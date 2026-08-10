@@ -11,6 +11,7 @@ import subprocess
 
 MINIMUM_VERSION = (0, 13, 2)
 FALLBACK_COLOR = "#9e9e9e"
+MAX_PAGES = 50
 
 _VERSION = re.compile(r"(\d+)\.(\d+)\.(\d+)")
 
@@ -81,34 +82,57 @@ class Gws:
         return sorted(calendars, key=lambda calendar: calendar["name"])
 
     def events(self, calendar_id, time_min, time_max):
-        params = {
-            "calendarId": calendar_id,
-            "singleEvents": True,
-            "orderBy": "startTime",
-            "timeMin": time_min,
-            "timeMax": time_max,
-            "maxResults": 250,
-        }
-        payload = self._json(
-            ["calendar", "events", "list", "--params", json.dumps(params)]
+        items = []
+        page_token = None
+        for _ in range(MAX_PAGES):
+            params = {
+                "calendarId": calendar_id,
+                "singleEvents": True,
+                "orderBy": "startTime",
+                "timeMin": time_min,
+                "timeMax": time_max,
+                "maxResults": 250,
+            }
+            if page_token:
+                params["pageToken"] = page_token
+            payload = self._json(
+                ["calendar", "events", "list", "--params", json.dumps(params)]
+            )
+            items.extend(payload.get("items", []))
+            page_token = payload.get("nextPageToken")
+            if not page_token:
+                return items
+        raise GwsApiError(
+            f"gws events list did not finish paginating within {MAX_PAGES} pages"
         )
-        return payload.get("items", [])
 
     def _json(self, args):
-        """Run gws and parse stdout. stderr carries keyring noise, ignore it."""
-        _, stdout, _ = self._run(args)
+        """Run gws and parse stdout.
+
+        stderr carries keyring noise on success, so it is never parsed as
+        data. On a nonzero exit code, stdout may not even be JSON, so stderr
+        is quoted in the raised error instead since that is the only place
+        useful diagnostic detail can come from.
+        """
+        exit_code, stdout, stderr = self._run(args)
+
+        if exit_code != 0:
+            excerpt = stderr.strip()[:200] or "no stderr output"
+            raise GwsApiError(f"gws exited with code {exit_code}: {excerpt}")
 
         try:
             payload = json.loads(stdout)
         except json.JSONDecodeError as error:
             raise GwsApiError(f"gws returned unparseable output: {error}") from error
 
-        error = payload.get("error") if isinstance(payload, dict) else None
-        if error:
-            code = error.get("code")
+        if isinstance(payload, dict) and "error" in payload:
+            error = payload["error"]
+            error_code = error.get("code")
+            if error_code is None:
+                error_code = "unknown"
             message = error.get("message", "unknown error")
-            if code in (401, 403):
-                raise GwsAuthError(f"{code}: {message}")
-            raise GwsApiError(f"{code}: {message}")
+            if error_code in (401, 403):
+                raise GwsAuthError(f"{error_code}: {message}")
+            raise GwsApiError(f"{error_code}: {message}")
 
         return payload
