@@ -11,7 +11,8 @@ set -euo pipefail
 PROJECT_ID="${PROJECT_ID:-omarchy-calendar-sync}"
 PROFILE="${PROFILE:-$HOME/.config/gws-omarchy-calendar}"
 GCLOUD_CONFIG="${GCLOUD_CONFIG:-omarchy-calendar}"
-PLUGIN_DIR="$HOME/.config/omarchy/plugins/tmn73.calendar"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+SYNC_BIN="$SCRIPT_DIR/omarchy-calendar-sync"
 SCOPE="https://www.googleapis.com/auth/calendar.readonly"
 
 step() { printf '\n==> %s\n' "$1"; }
@@ -26,7 +27,11 @@ gcloud config configurations describe "$GCLOUD_CONFIG" >/dev/null 2>&1 \
 export CLOUDSDK_ACTIVE_CONFIG_NAME="$GCLOUD_CONFIG"
 
 step "Signing in to Google Cloud"
-gcloud auth login
+if gcloud auth list --filter=status:ACTIVE --format='value(account)' | grep -q .; then
+  echo "  already signed in as $(gcloud auth list --filter=status:ACTIVE --format='value(account)')"
+else
+  gcloud auth login
+fi
 
 step "Creating project $PROJECT_ID"
 gcloud projects describe "$PROJECT_ID" >/dev/null 2>&1 \
@@ -88,21 +93,25 @@ fi
 chmod 600 "$PROFILE/client_secret.json"
 
 step "Signing in with read-only calendar access"
+# gws caches the access token next to the credentials. A cache minted before
+# the calendar scope was granted keeps being served afterwards, and every
+# call fails with 403 insufficient scopes until it is cleared.
+rm -f "$PROFILE/token_cache.json"
 GOOGLE_WORKSPACE_CLI_CONFIG_DIR="$PROFILE" gws auth login --scopes "$SCOPE"
 
 step "Verifying calendar access"
 GOOGLE_WORKSPACE_CLI_CONFIG_DIR="$PROFILE" gws calendar calendarList list \
   | python3 -c 'import json,sys; d=json.load(sys.stdin); print(len(d.get("items",[])), "calendars reachable")'
 
-step "Recording where gws lives"
+step "Recording where gws and your credentials live"
 # The timer runs without your shell PATH, so the bare name is not enough.
 gws_path=$(command -v gws)
 config="$HOME/.config/omarchy/calendar-sync.json"
 mkdir -p "$(dirname "$config")"
-python3 - "$config" "$gws_path" <<'PYEOF'
+python3 - "$config" "$gws_path" "$PROFILE" <<'PYEOF'
 import json, pathlib, sys
 
-path, gws_path = pathlib.Path(sys.argv[1]), sys.argv[2]
+path, gws_path, profile = pathlib.Path(sys.argv[1]), sys.argv[2], sys.argv[3]
 config = {}
 if path.exists():
     try:
@@ -110,13 +119,18 @@ if path.exists():
     except ValueError:
         config = {}
 config["gwsPath"] = gws_path
+config["profile"] = profile
 path.write_text(json.dumps(config, indent=2) + "\n")
 print("  gwsPath set to", gws_path)
+print("  profile set to", profile)
 PYEOF
 
 step "Installing the systemd timer"
 mkdir -p "$HOME/.config/systemd/user"
-cp "$PLUGIN_DIR/sync/systemd/omarchy-calendar-sync."{service,timer} "$HOME/.config/systemd/user/"
+cp "$SCRIPT_DIR/systemd/omarchy-calendar-sync."{service,timer} "$HOME/.config/systemd/user/"
+# The shipped unit assumes the standard plugin directory. Point it at wherever
+# this checkout actually lives, so a hand-cloned repo works too.
+sed -i "s|^ExecStart=.*|ExecStart=$SYNC_BIN|" "$HOME/.config/systemd/user/omarchy-calendar-sync.service"
 systemctl --user daemon-reload
 systemctl --user enable --now omarchy-calendar-sync.timer
 
@@ -128,6 +142,6 @@ cat <<EOF
 
 Done. Events land in ~/.local/state/omarchy/calendar-events.json every 5 minutes.
 
-  Logs:   journalctl --user -u omarchy-calendar-sync -f
-  Filter: edit ~/.config/omarchy/calendar-sync.json
+  Logs:    journalctl --user -u omarchy-calendar-sync -f
+  Choose which calendars to show: click the clock, then the gear icon.
 EOF
