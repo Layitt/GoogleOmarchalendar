@@ -6,5 +6,6 @@ Wants=network-online.target
 [Service]
 Type=oneshot
 ExecStart=%h/.config/omarchy/plugins/tmn73.calendar/sync/omarchy-calendar-sync
-# A failed sync leaves the previous file in place, so failure is not fatal.
-SuccessExitStatus=0
+# A failed run is deliberately allowed to surface as a failed unit. The
+# sync leaves the previous events file intact either way, and a user
+# needs `systemctl --user status` to show that something is wrong.

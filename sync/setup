@@ -71,15 +71,19 @@ that dialog.
 EOF
 pause
 
-step "Installing the client secret"
 mkdir -p "$PROFILE"
-downloaded=$(find "$HOME/Downloads" -maxdepth 1 -name 'client_secret_*.json' -print -quit 2>/dev/null || true)
-if [ -n "$downloaded" ]; then
-  mv "$downloaded" "$PROFILE/client_secret.json"
+if [ -f "$PROFILE/client_secret.json" ]; then
+  step "Client secret is already installed at $PROFILE/client_secret.json, skipping"
 else
-  printf 'Path to the downloaded JSON: '
-  read -r manual
-  cp "${manual/#\~/$HOME}" "$PROFILE/client_secret.json"
+  step "Installing the client secret"
+  downloaded=$(find "$HOME/Downloads" -maxdepth 1 -name 'client_secret_*.json' -print -quit 2>/dev/null || true)
+  if [ -n "$downloaded" ]; then
+    mv "$downloaded" "$PROFILE/client_secret.json"
+  else
+    printf 'Path to the downloaded JSON (rerunning? it belongs at %s): ' "$PROFILE/client_secret.json"
+    read -r manual
+    cp "${manual/#\~/$HOME}" "$PROFILE/client_secret.json"
+  fi
 fi
 chmod 600 "$PROFILE/client_secret.json"
 
@@ -97,7 +101,7 @@ systemctl --user daemon-reload
 systemctl --user enable --now omarchy-calendar-sync.timer
 
 step "Running the first sync"
-systemctl --user start omarchy-calendar-sync.service
+systemctl --user start omarchy-calendar-sync.service || true
 systemctl --user status omarchy-calendar-sync.service --no-pager || true
 
 cat <<EOF
