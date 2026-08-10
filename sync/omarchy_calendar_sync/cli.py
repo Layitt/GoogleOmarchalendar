@@ -85,6 +85,48 @@ def resolve_local_timezone(env=None, localtime_path="/etc/localtime"):
     return datetime.now().astimezone().tzinfo
 
 
+def occurrence_key(gevent):
+    """Identity of one occurrence, shared by its copies in several calendars.
+
+    An event you can see from two calendars is returned once per calendar,
+    and listing it twice is noise.
+
+    iCalUID alone is NOT a safe key. Every instance of a recurring series
+    carries the same one, verified against live data: a daily standup came
+    back as five events with five distinct ids and a single shared iCalUID.
+    Keying on it alone would collapse the whole series into one entry.
+
+    The start instant is what separates instances of a series while still
+    matching the same occurrence seen from two different calendars.
+
+    Returns None when the event carries no iCalUID, which means never
+    deduplicate it. Dropping a real event is worse than showing it twice.
+    """
+    uid = gevent.get("iCalUID")
+    if not uid:
+        return None
+
+    start = gevent.get("start") or {}
+    return (uid, start.get("dateTime") or start.get("date"))
+
+
+def _drop_duplicates(gevents, seen):
+    """Filter events already seen in an earlier calendar. Mutates `seen`.
+
+    First occurrence wins. Calendars arrive sorted by name, so which copy
+    survives is stable across runs rather than depending on Google's order.
+    """
+    fresh = []
+    for gevent in gevents:
+        key = occurrence_key(gevent)
+        if key is not None:
+            if key in seen:
+                continue
+            seen.add(key)
+        fresh.append(gevent)
+    return fresh
+
+
 def run(client, cfg, now, out_path, local_tz):
     """Fetch, normalize, write. Returns a process exit code."""
     try:
@@ -93,9 +135,11 @@ def run(client, cfg, now, out_path, local_tz):
         time_min, time_max = config_module.window_bounds(cfg, now)
 
         rows = []
+        seen = set()
         for calendar in calendars:
             raw = client.events(calendar["id"], time_min, time_max)
-            rows.extend(normalize.normalize_all(raw, calendar, local_tz))
+            fresh = _drop_duplicates(raw, seen)
+            rows.extend(normalize.normalize_all(fresh, calendar, local_tz))
 
         source = "gws/" + ".".join(str(part) for part in client.version())
     except GwsError as error:

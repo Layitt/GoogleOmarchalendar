@@ -196,3 +196,70 @@ class TestResolveLocalTimezone(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+def gevent(uid, start, summary="Event", event_id=None):
+    return {
+        "id": event_id or f"{uid}-{start}",
+        "status": "confirmed",
+        "summary": summary,
+        "iCalUID": uid,
+        "start": {"dateTime": start},
+        "end": {"dateTime": start},
+    }
+
+
+class TestOccurrenceKey(unittest.TestCase):
+    def test_same_event_in_two_calendars_shares_a_key(self):
+        a = gevent("shared@google.com", "2026-08-10T19:15:00-05:00")
+        b = gevent("shared@google.com", "2026-08-10T19:15:00-05:00", event_id="other")
+        self.assertEqual(cli.occurrence_key(a), cli.occurrence_key(b))
+
+    def test_two_instances_of_a_series_have_different_keys(self):
+        # A recurring series shares one iCalUID across every instance. Live
+        # data confirmed this: a daily standup returned five events with five
+        # ids and a single iCalUID. The start is what separates them.
+        monday = gevent("standup@google.com", "2026-08-10T09:00:00-05:00")
+        wednesday = gevent("standup@google.com", "2026-08-12T09:00:00-05:00")
+        self.assertNotEqual(cli.occurrence_key(monday), cli.occurrence_key(wednesday))
+
+    def test_event_without_ical_uid_is_never_deduplicated(self):
+        bare = {"id": "x", "start": {"dateTime": "2026-08-10T09:00:00-05:00"}}
+        self.assertIsNone(cli.occurrence_key(bare))
+
+    def test_all_day_events_key_on_their_date(self):
+        a = {"id": "x", "iCalUID": "u@g", "start": {"date": "2026-08-17"}}
+        self.assertEqual(cli.occurrence_key(a), ("u@g", "2026-08-17"))
+
+
+class TestDeduplicationAcrossCalendars(unittest.TestCase):
+    def test_a_recurring_series_survives_intact(self):
+        series = [
+            gevent("standup@google.com", f"2026-08-{day:02d}T09:00:00-05:00")
+            for day in (10, 12, 14, 17, 19)
+        ]
+        with tempfile.TemporaryDirectory() as tmp:
+            out = Path(tmp) / "out.json"
+            cli.run(FakeGws(events=series), config.DEFAULTS, NOW, out, BOGOTA)
+            titles = json.loads(out.read_text())["events"]
+            self.assertEqual(len(titles), 5)
+
+    def test_the_same_event_seen_from_two_calendars_is_listed_once(self):
+        shared = gevent("shared@google.com", "2026-08-10T19:15:00-05:00", "Impuestos")
+        calendars = [
+            {"id": "a@example.com", "name": "Alpha", "color": "#f83a22"},
+            {"id": "b@example.com", "name": "Beta", "color": "#7bd148"},
+        ]
+        with tempfile.TemporaryDirectory() as tmp:
+            out = Path(tmp) / "out.json"
+            cli.run(
+                FakeGws(calendars=calendars, events=[shared]),
+                config.DEFAULTS,
+                NOW,
+                out,
+                BOGOTA,
+            )
+            events = json.loads(out.read_text())["events"]
+            self.assertEqual(len(events), 1)
+            # First calendar by name wins, so the surviving copy is stable.
+            self.assertEqual(events[0]["calendarName"], "Alpha")

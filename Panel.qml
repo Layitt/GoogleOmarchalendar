@@ -1,5 +1,6 @@
 import QtQuick
 import Quickshell
+import Quickshell.Io
 import qs.Commons
 import qs.Ui
 import "Model.js" as Model
@@ -66,7 +67,55 @@ Panel {
   readonly property int weekStart: Model.normalizedWeekStart(setting("weekStartDay", null), Qt.locale().firstDayOfWeek)
   readonly property string nextWeekStartLabel: Qt.locale().dayName(Model.toggledWeekStart(weekStart), Locale.LongFormat)
   readonly property var weekdays: Model.weekdayOrder(weekStart)
-  readonly property var weeks: Model.monthGrid(viewYear, viewMonth, weekStart, todayKey)
+  readonly property var weeks: Model.monthGrid(viewYear, viewMonth, weekStart, todayKey, eventIndex)
+
+  // ---- Events, read from whatever wrote the state file. The panel never
+  //      learns where they came from: Google, khal, an ICS feed and a shell
+  //      script all look identical from here.
+  property var eventDoc: null
+  property var eventIndex: ({})
+  property bool eventVersionMismatch: false
+
+  // Matches the sync timer's interval. Model.syncState allows four of these
+  // to elapse before calling the file stale, so one missed run stays quiet.
+  readonly property int syncIntervalSeconds: 300
+  readonly property string syncState: eventVersionMismatch
+    ? "version"
+    : Model.syncState(eventDoc, Date.now(), syncIntervalSeconds)
+
+  // The day whose agenda is listed under the grid. The upstream clock had no
+  // cursor at all, so this is the one place the fork departs from it.
+  property string selectedDayKey: todayKey
+  readonly property var selectedEvents: Model.eventsForDateKey(eventIndex, selectedDayKey)
+  readonly property date selectedDate: Model.dateFromKey(selectedDayKey, today)
+
+  function selectDay(key) {
+    root.selectedDayKey = String(key)
+  }
+
+  function applyEvents(raw) {
+    var doc = null
+    var mismatch = false
+
+    if (raw) {
+      try {
+        var parsed = JSON.parse(raw)
+        if (parsed && parsed.version === 1) {
+          doc = parsed
+        } else if (parsed && parsed.version !== undefined) {
+          // Written by a newer sync than this widget understands. Say so
+          // rather than render an empty month that reads as a quiet week.
+          mismatch = true
+        }
+      } catch (error) {
+        doc = null
+      }
+    }
+
+    root.eventDoc = doc
+    root.eventVersionMismatch = mismatch
+    root.eventIndex = Model.indexEventsByDate(doc ? doc.events : [])
+  }
 
 
   // Guarded so the widget renders before the bar is injected (the bar-widget
@@ -217,6 +266,21 @@ Panel {
   // carry ("man." -> "MAN") so the header row stays a clean band of caps.
   function weekdayLabel(weekday) {
     return String(Qt.locale().dayName(weekday, Locale.ShortFormat)).replace(/\.$/, "").toUpperCase()
+  }
+
+  // watchChanges is the point of this whole widget. The sync rewrites the
+  // file every few minutes and the popup has to follow it without the shell
+  // being restarted. There is deliberately no "already loaded" guard here:
+  // one exists upstream in a similar plugin and it is exactly what made an
+  // externally written file impossible to pick up.
+  FileView {
+    id: eventsFile
+    path: (Quickshell.env("HOME") || "") + "/.local/state/omarchy/calendar-events.json"
+    watchChanges: true
+    printErrors: false
+    onLoaded: root.applyEvents(text())
+    onLoadFailed: root.applyEvents("")
+    onFileChanged: reload()
   }
 
   SystemClock {
@@ -647,19 +711,30 @@ Panel {
                     model: modelData.days
 
                     Rectangle {
+                      id: dayCell
                       required property var modelData
+
+                      readonly property bool selected: modelData.key === root.selectedDayKey
 
                       width: root.cellWidth
                       height: root.cellHeight
                       radius: Style.cornerRadius
                       // Today is outlined, not filled: a lit-up block shouts
-                      // over a grid this quiet.
-                      color: "transparent"
+                      // over a grid this quiet. The selected day gets a faint
+                      // wash instead, so the two marks never compete.
+                      color: dayCell.selected
+                        ? Qt.rgba(root.contentForeground.r, root.contentForeground.g, root.contentForeground.b, 0.10)
+                        : "transparent"
                       border.width: modelData.today ? Style.spacing.hairline : 0
                       border.color: Style.normalBorderFor(root.contentForeground, Color.accent)
 
                       Text {
+                        id: dayNumber
                         anchors.centerIn: parent
+                        // Lifted just enough to clear the dots, and only on
+                        // days that have any, so an empty month does not
+                        // shift under the cursor.
+                        anchors.verticalCenterOffset: modelData.hasEvent ? -Style.space(3) : 0
                         text: modelData.day
                         color: modelData.inMonth
                           ? (modelData.weekend ? Qt.darker(root.contentForeground, 1.45) : root.contentForeground)
@@ -667,6 +742,31 @@ Panel {
                         font.family: root.contentFontFamily
                         font.pixelSize: Style.font.body
                         font.bold: modelData.today
+                      }
+
+                      Row {
+                        anchors.horizontalCenter: parent.horizontalCenter
+                        anchors.top: dayNumber.bottom
+                        anchors.topMargin: Style.space(1)
+                        spacing: Style.space(1)
+                        visible: dayCell.modelData.hasEvent
+
+                        Repeater {
+                          model: dayCell.modelData.dots
+
+                          Rectangle {
+                            required property var modelData
+                            width: Style.space(3)
+                            height: width
+                            radius: width / 2
+                            color: modelData
+                            opacity: dayCell.modelData.inMonth ? 0.9 : 0.4
+                          }
+                        }
+                      }
+
+                      TapHandler {
+                        onTapped: root.selectDay(dayCell.modelData.key)
                       }
                     }
                   }
@@ -740,6 +840,96 @@ Panel {
                 fontFamily: root.contentFontFamily
                 onClicked: root.moveMonth(1)
               }
+            }
+          }
+
+          // ---- The selected day's agenda. Headed by its own date, because
+          //      the selection survives stepping to another month and an
+          //      undated list would then be a quiet lie.
+          Column {
+            width: gridColumn.width
+            anchors.horizontalCenter: parent.horizontalCenter
+            spacing: Style.space(4)
+
+            Text {
+              width: parent.width
+              text: Qt.formatDate(root.selectedDate, "dddd d MMMM").toUpperCase()
+              color: Qt.darker(root.contentForeground, 1.4)
+              font.family: root.contentFontFamily
+              font.pixelSize: Style.font.caption
+              font.letterSpacing: 1
+              font.bold: true
+            }
+
+            Repeater {
+              model: root.selectedEvents
+
+              Row {
+                required property var modelData
+
+                width: gridColumn.width
+                spacing: Style.space(4)
+
+                Rectangle {
+                  width: Style.space(2)
+                  height: eventLines.height
+                  radius: width / 2
+                  color: modelData.color
+                }
+
+                Text {
+                  width: Style.space(44)
+                  text: modelData.allDay
+                    ? qsTr("All day")
+                    : Qt.formatDateTime(new Date(modelData.start), "HH:mm")
+                  color: Qt.darker(root.contentForeground, 1.5)
+                  font.family: root.contentFontFamily
+                  font.pixelSize: Style.font.bodySmall
+                }
+
+                Column {
+                  id: eventLines
+                  width: parent.width - Style.space(54)
+                  spacing: Style.space(1)
+
+                  Text {
+                    width: parent.width
+                    text: modelData.title
+                    color: root.contentForeground
+                    font.family: root.contentFontFamily
+                    font.pixelSize: Style.font.bodySmall
+                    elide: Text.ElideRight
+                  }
+
+                  Text {
+                    width: parent.width
+                    visible: modelData.location !== ""
+                    text: modelData.location
+                    color: Qt.darker(root.contentForeground, 1.9)
+                    font.family: root.contentFontFamily
+                    font.pixelSize: Style.font.caption
+                    elide: Text.ElideRight
+                  }
+                }
+              }
+            }
+
+            // An empty day and a sync that never ran look identical unless
+            // we say which one it is.
+            Text {
+              width: parent.width
+              visible: root.selectedEvents.length === 0
+              color: Qt.darker(root.contentForeground, 1.9)
+              font.family: root.contentFontFamily
+              font.pixelSize: Style.font.caption
+              wrapMode: Text.WordWrap
+              text: root.syncState === "missing"
+                ? qsTr("No calendar synced yet. Run sync/setup.")
+                : root.syncState === "version"
+                  ? qsTr("Events file was written by a newer version. Update the plugin.")
+                  : root.syncState === "stale"
+                    ? qsTr("Calendar may be out of date. Check journalctl --user -u omarchy-calendar-sync")
+                    : qsTr("Nothing scheduled")
             }
           }
         }

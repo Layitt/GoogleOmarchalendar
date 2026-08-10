@@ -96,3 +96,23 @@ test('syncState reports missing for an unparseable syncedAt', () => {
   const doc = { syncedAt: 'not a date' }
   assert.equal(Model.syncState(doc, Date.parse('2026-08-10T12:00:00Z'), 300), 'missing')
 })
+
+test('dateFromKey builds a local date, not a UTC one', () => {
+  const d = Model.dateFromKey('2026-08-10', null)
+  assert.equal(d.getFullYear(), 2026)
+  assert.equal(d.getMonth(), 7)
+  assert.equal(d.getDate(), 10)
+})
+
+test('dateFromKey returns the fallback for a malformed key', () => {
+  const fallback = new Date(2000, 0, 1)
+  assert.equal(Model.dateFromKey('nope', fallback), fallback)
+  assert.equal(Model.dateFromKey('', fallback), fallback)
+  assert.equal(Model.dateFromKey(null, fallback), fallback)
+  assert.equal(Model.dateFromKey('2026-08', fallback), fallback)
+})
+
+test('dateFromKey returns the fallback for non-numeric parts', () => {
+  const fallback = new Date(2000, 0, 1)
+  assert.equal(Model.dateFromKey('yyyy-mm-dd', fallback), fallback)
+})

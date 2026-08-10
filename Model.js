@@ -292,6 +292,22 @@ function eventsForDateKey(index, dateKey) {
   return index[dateKey] || []
 }
 
+// Turn a YYYY-MM-DD key back into a local Date, for formatting a heading.
+// Built field by field rather than parsed from the string, because
+// new Date("2026-08-10") is UTC midnight and lands on the previous day for
+// anyone west of Greenwich.
+function dateFromKey(dateKey, fallback) {
+  var parts = String(dateKey || "").split("-")
+  if (parts.length !== 3) return fallback
+
+  var year = parseInt(parts[0], 10)
+  var month = parseInt(parts[1], 10)
+  var day = parseInt(parts[2], 10)
+  if (isNaN(year) || isNaN(month) || isNaN(day)) return fallback
+
+  return new Date(year, month - 1, day)
+}
+
 function eventColors(index, dateKey, limit) {
   var events = eventsForDateKey(index, dateKey)
   var colors = []
@@ -342,6 +358,7 @@ if (typeof module !== "undefined") {
     nextClockFormat: nextClockFormat,
     isoWeekLiteral: isoWeekLiteral,
     indexEventsByDate: indexEventsByDate,
+    dateFromKey: dateFromKey,
     eventsForDateKey: eventsForDateKey,
     eventColors: eventColors,
     syncState: syncState
