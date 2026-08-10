@@ -4,6 +4,7 @@ Absent config is a valid state: every key has a default, so a first run works
 with no file at all.
 """
 
+import copy
 import json
 from datetime import timedelta
 from pathlib import Path
@@ -26,7 +27,7 @@ def load(path=None):
     path = Path(path) if path is not None else CONFIG_PATH
 
     if not path.exists():
-        return _merge(DEFAULTS, {})
+        return _merge(copy.deepcopy(DEFAULTS), {})
 
     try:
         raw = json.loads(path.read_text())
@@ -36,7 +37,18 @@ def load(path=None):
     if not isinstance(raw, dict):
         raise ConfigError(f"{path} must contain a JSON object")
 
-    return _merge(DEFAULTS, raw)
+    merged = _merge(copy.deepcopy(DEFAULTS), raw)
+
+    _validate_calendars(merged.get("calendars"))
+
+    window = merged.get("window")
+    if isinstance(window, dict):
+        window["pastDays"] = _coerce_days(window.get("pastDays"), "window.pastDays")
+        window["futureDays"] = _coerce_days(
+            window.get("futureDays"), "window.futureDays"
+        )
+
+    return merged
 
 
 def _merge(defaults, override):
@@ -44,11 +56,38 @@ def _merge(defaults, override):
     merged = {}
     for key, fallback in defaults.items():
         value = override.get(key, fallback)
+        if value is None:
+            # An explicit null for a nested key means "not set", not "empty".
+            value = fallback
         if isinstance(fallback, dict) and isinstance(value, dict):
             merged[key] = {**fallback, **value}
         else:
             merged[key] = value
     return merged
+
+
+def _validate_calendars(calendars):
+    """Reject a non-list include or exclude instead of silently misreading it."""
+    if not isinstance(calendars, dict):
+        return
+    for key in ("include", "exclude"):
+        value = calendars.get(key)
+        if value is not None and not isinstance(value, list):
+            raise ConfigError(f"calendars.{key} must be a list")
+
+
+def _coerce_days(value, key):
+    """Turn a window day count into an int, or fail loudly naming the key."""
+    if isinstance(value, bool):
+        raise ConfigError(f"{key} must be a number")
+    if isinstance(value, (int, float)):
+        return int(value)
+    if isinstance(value, str):
+        try:
+            return int(value)
+        except ValueError:
+            raise ConfigError(f"{key} must be a number") from None
+    raise ConfigError(f"{key} must be a number")
 
 
 def select_calendars(calendars, config):

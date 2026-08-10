@@ -36,6 +36,43 @@ class TestLoad(unittest.TestCase):
             with self.assertRaises(config.ConfigError):
                 config.load(path)
 
+    def test_defaults_are_not_mutated_by_a_returned_config(self):
+        loaded = config.load(Path("/nonexistent/calendar-sync.json"))
+        loaded["calendars"]["include"].append("leaked@example.com")
+        self.assertEqual(config.DEFAULTS["calendars"]["include"], [])
+
+    def test_null_calendars_and_window_keys_fill_with_defaults(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "c.json"
+            path.write_text(json.dumps({"calendars": None, "window": None}))
+            loaded = config.load(path)
+            self.assertEqual(loaded["calendars"], config.DEFAULTS["calendars"])
+            self.assertEqual(loaded["window"], config.DEFAULTS["window"])
+
+    def test_null_past_days_raises_config_error_naming_the_key(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "c.json"
+            path.write_text(json.dumps({"window": {"pastDays": None}}))
+            with self.assertRaises(config.ConfigError) as ctx:
+                config.load(path)
+            self.assertIn("pastDays", str(ctx.exception))
+
+    def test_non_numeric_future_days_raises_config_error_naming_the_key(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "c.json"
+            path.write_text(json.dumps({"window": {"futureDays": "soon"}}))
+            with self.assertRaises(config.ConfigError) as ctx:
+                config.load(path)
+            self.assertIn("futureDays", str(ctx.exception))
+
+    def test_include_as_a_string_raises_config_error_naming_the_key(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "c.json"
+            path.write_text(json.dumps({"calendars": {"include": "Personal"}}))
+            with self.assertRaises(config.ConfigError) as ctx:
+                config.load(path)
+            self.assertIn("include", str(ctx.exception))
+
 
 class TestSelectCalendars(unittest.TestCase):
     def test_empty_include_selects_all(self):
