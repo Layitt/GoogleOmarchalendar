@@ -17,6 +17,7 @@ Column {
   property var calendars: []
   property var hiddenCalendars: []
   property bool showYearProgress: false
+  property bool weekStartsMonday: true
   property int announceLeadMinutes: 15
 
   property string syncedAt: ""
@@ -26,6 +27,7 @@ Column {
 
   signal calendarToggled(string calendarId)
   signal yearProgressToggled()
+  signal weekStartToggled()
   signal leadMinutesPicked(int minutes)
 
   readonly property color muted: Qt.darker(foreground, 1.5)
@@ -149,6 +151,13 @@ Column {
   // ---- Display
 
   SectionTitle { text: qsTr("DISPLAY") }
+
+  ToggleRow {
+    label: qsTr("Week starts on Monday")
+    hint: qsTr("Off starts the week on Sunday")
+    checked: root.weekStartsMonday
+    onActivated: root.weekStartToggled()
+  }
 
   ToggleRow {
     label: qsTr("Year and life progress")

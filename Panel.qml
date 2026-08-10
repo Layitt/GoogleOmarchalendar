@@ -1063,6 +1063,7 @@ Panel {
             calendars: root.knownCalendars
             hiddenCalendars: root.hiddenCalendars
             showYearProgress: root.showYearProgress
+            weekStartsMonday: root.weekStart === 1
             announceLeadMinutes: root.setting("announceLeadMinutes", 15)
 
             syncState: root.syncState
@@ -1074,6 +1075,7 @@ Panel {
 
             onCalendarToggled: function(calendarId) { root.toggleCalendar(calendarId) }
             onYearProgressToggled: root.toggleYearProgress()
+            onWeekStartToggled: root.toggleWeekStart()
             onLeadMinutesPicked: function(minutes) { root.setAnnounceLeadMinutes(minutes) }
           }
         }
