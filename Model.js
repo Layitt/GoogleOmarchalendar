@@ -220,7 +220,7 @@ function lifeProgressPercent(age, expectancy) {
 // Always six rows of seven days. A fixed grid keeps the popup exactly the
 // same height in every month, so stepping through the year never makes the
 // panel jump under the pointer.
-function monthGrid(year, month, weekStart, todayKey) {
+function monthGrid(year, month, weekStart, todayKey, eventIndex) {
   var start = normalizedWeekStart(weekStart, 1)
   var leading = (new Date(year, month, 1).getDay() - start + 7) % 7
   var cursor = new Date(year, month, 1 - leading)
@@ -245,7 +245,9 @@ function monthGrid(year, month, weekStart, todayKey) {
         weekday: weekday,
         inMonth: cellMonth === month && cellYear === year,
         weekend: weekday === 0 || weekday === 6,
-        today: key === today
+        today: key === today,
+        hasEvent: eventIndex ? !!eventIndex[key] : false,
+        dots: eventIndex ? eventColors(eventIndex, key, 3) : []
       })
       cursor.setDate(cursor.getDate() + 1)
     }
@@ -265,6 +267,53 @@ function monthGrid(year, month, weekStart, todayKey) {
 function stepMonth(year, month, delta) {
   var target = new Date(year, Number(month) + Number(delta), 1)
   return { year: target.getFullYear(), month: target.getMonth() }
+}
+
+// Event helpers. The widget renders whatever the sync wrote; none of this
+// knows where the events came from.
+
+var STALE_INTERVAL_MULTIPLIER = 4
+
+function indexEventsByDate(events) {
+  var index = {}
+  if (!events || !events.length) return index
+  for (var i = 0; i < events.length; i++) {
+    var event = events[i]
+    var key = event && event.dateKey
+    if (!key) continue
+    if (!index[key]) index[key] = []
+    index[key].push(event)
+  }
+  return index
+}
+
+function eventsForDateKey(index, dateKey) {
+  if (!index || !dateKey) return []
+  return index[dateKey] || []
+}
+
+function eventColors(index, dateKey, limit) {
+  var events = eventsForDateKey(index, dateKey)
+  var colors = []
+  for (var i = 0; i < events.length; i++) {
+    var color = events[i].color
+    if (!color || colors.indexOf(color) !== -1) continue
+    colors.push(color)
+    if (limit > 0 && colors.length >= limit) break
+  }
+  return colors
+}
+
+// "missing" means we have nothing to show and should say so rather than
+// render an empty calendar that looks like a quiet week.
+function syncState(doc, nowMs, intervalSeconds) {
+  if (!doc || !doc.syncedAt) return "missing"
+
+  var syncedMs = Date.parse(doc.syncedAt)
+  if (isNaN(syncedMs)) return "missing"
+
+  var thresholdMs = intervalSeconds * STALE_INTERVAL_MULTIPLIER * 1000
+  return (nowMs - syncedMs) > thresholdMs ? "stale" : "ok"
 }
 
 if (typeof module !== "undefined") {
@@ -291,6 +340,10 @@ if (typeof module !== "undefined") {
     clockFormats: clockFormats,
     clockFormatRing: clockFormatRing,
     nextClockFormat: nextClockFormat,
-    isoWeekLiteral: isoWeekLiteral
+    isoWeekLiteral: isoWeekLiteral,
+    indexEventsByDate: indexEventsByDate,
+    eventsForDateKey: eventsForDateKey,
+    eventColors: eventColors,
+    syncState: syncState
   }
 }
