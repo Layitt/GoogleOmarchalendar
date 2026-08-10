@@ -1,0 +1,11 @@
+[Unit]
+Description=Refresh the Omarchy calendar widget events file
+
+[Timer]
+OnBootSec=1min
+OnUnitActiveSec=5min
+# Catch up after suspend or a laptop lid closed for hours.
+Persistent=true
+
+[Install]
+WantedBy=timers.target

@@ -1,0 +1,109 @@
+#!/usr/bin/env bash
+# Interactive onboarding for the Google Calendar sync.
+#
+# Automates: GCP project creation, Calendar API enablement, gws profile
+# layout, the scoped login, and the systemd timer.
+# Cannot automate: the OAuth consent screen, publishing to production, and
+# creating the Desktop OAuth client. Google exposes no API for those.
+
+set -euo pipefail
+
+PROJECT_ID="${PROJECT_ID:-omarchy-calendar-sync}"
+PROFILE="${PROFILE:-$HOME/.config/gws-omarchy-calendar}"
+GCLOUD_CONFIG="${GCLOUD_CONFIG:-omarchy-calendar}"
+PLUGIN_DIR="$HOME/.config/omarchy/plugins/tmn73.calendar"
+SCOPE="https://www.googleapis.com/auth/calendar.readonly"
+
+step() { printf '\n==> %s\n' "$1"; }
+pause() { printf '\nPress Enter when done. '; read -r _; }
+
+command -v gws >/dev/null || { echo "gws is required: https://github.com/googleworkspace/cli"; exit 1; }
+command -v gcloud >/dev/null || { echo "gcloud is required for automated project setup"; exit 1; }
+
+step "Using an isolated gcloud configuration so your other projects are untouched"
+gcloud config configurations describe "$GCLOUD_CONFIG" >/dev/null 2>&1 \
+  || gcloud config configurations create "$GCLOUD_CONFIG" --no-activate
+export CLOUDSDK_ACTIVE_CONFIG_NAME="$GCLOUD_CONFIG"
+
+step "Signing in to Google Cloud"
+gcloud auth login
+
+step "Creating project $PROJECT_ID"
+gcloud projects describe "$PROJECT_ID" >/dev/null 2>&1 \
+  || gcloud projects create "$PROJECT_ID" --name="Omarchy Calendar Sync"
+gcloud config set project "$PROJECT_ID"
+
+step "Enabling the Calendar API"
+gcloud services enable calendar-json.googleapis.com --project="$PROJECT_ID"
+
+step "Manual step 1 of 3: configure the OAuth consent screen"
+cat <<EOF
+Open:
+  https://console.cloud.google.com/apis/credentials/consent?project=$PROJECT_ID
+
+  User type:     External
+  App name:      Omarchy Calendar
+  Support email: your own address
+EOF
+pause
+
+step "Manual step 2 of 3: publish the app"
+cat <<EOF
+On the Audience page, click "Publish app" to move from Testing to In production.
+
+This matters. In Testing, Google expires refresh tokens after 7 days and your
+calendar silently stops updating. Unverified production apps show a one time
+warning screen and then work indefinitely for personal use.
+EOF
+pause
+
+step "Manual step 3 of 3: create a Desktop OAuth client"
+cat <<EOF
+Open:
+  https://console.cloud.google.com/apis/credentials?project=$PROJECT_ID
+
+  Create Credentials -> OAuth client ID
+  Application type:  Desktop app
+  Name:              Omarchy Calendar Sync
+
+Then click "Download JSON". The secret is not shown again after you close
+that dialog.
+EOF
+pause
+
+step "Installing the client secret"
+mkdir -p "$PROFILE"
+downloaded=$(find "$HOME/Downloads" -maxdepth 1 -name 'client_secret_*.json' -print -quit 2>/dev/null || true)
+if [ -n "$downloaded" ]; then
+  mv "$downloaded" "$PROFILE/client_secret.json"
+else
+  printf 'Path to the downloaded JSON: '
+  read -r manual
+  cp "${manual/#\~/$HOME}" "$PROFILE/client_secret.json"
+fi
+chmod 600 "$PROFILE/client_secret.json"
+
+step "Signing in with read-only calendar access"
+GOOGLE_WORKSPACE_CLI_CONFIG_DIR="$PROFILE" gws auth login --scopes "$SCOPE"
+
+step "Verifying calendar access"
+GOOGLE_WORKSPACE_CLI_CONFIG_DIR="$PROFILE" gws calendar calendarList list \
+  | python3 -c 'import json,sys; d=json.load(sys.stdin); print(len(d.get("items",[])), "calendars reachable")'
+
+step "Installing the systemd timer"
+mkdir -p "$HOME/.config/systemd/user"
+cp "$PLUGIN_DIR/sync/systemd/omarchy-calendar-sync."{service,timer} "$HOME/.config/systemd/user/"
+systemctl --user daemon-reload
+systemctl --user enable --now omarchy-calendar-sync.timer
+
+step "Running the first sync"
+systemctl --user start omarchy-calendar-sync.service
+systemctl --user status omarchy-calendar-sync.service --no-pager || true
+
+cat <<EOF
+
+Done. Events land in ~/.local/state/omarchy/calendar-events.json every 5 minutes.
+
+  Logs:   journalctl --user -u omarchy-calendar-sync -f
+  Filter: edit ~/.config/omarchy/calendar-sync.json
+EOF
