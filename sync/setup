@@ -16,7 +16,30 @@ SYNC_BIN="$SCRIPT_DIR/omarchy-calendar-sync"
 SCOPE="https://www.googleapis.com/auth/calendar.readonly"
 
 step() { printf '\n==> %s\n' "$1"; }
-pause() { printf '\nPress Enter when done. '; read -r _; }
+
+# `read` returns non-zero at EOF, and under `set -e` that killed the whole
+# script at the very first prompt with no message at all. Anyone running this
+# through a pipe, a wrapper, or any non-interactive shell got as far as the
+# first Google Console instruction and no further, silently.
+pause() {
+  if [ ! -t 0 ]; then
+    printf '\n  Not a terminal, so not pausing. Do the step above before the login opens.\n'
+    return 0
+  fi
+  printf '\nPress Enter when done. '
+  read -r _ || true
+}
+
+if [ ! -t 0 ]; then
+  cat <<'EOF'
+Warning: stdin is not a terminal.
+
+Three of the steps below have to be done by hand in the Google Cloud Console,
+and this run cannot pause to wait for you. Run this directly in a terminal for
+the guided flow.
+
+EOF
+fi
 
 command -v gws >/dev/null || { echo "gws is required: https://github.com/googleworkspace/cli"; exit 1; }
 command -v gcloud >/dev/null || { echo "gcloud is required for automated project setup"; exit 1; }
