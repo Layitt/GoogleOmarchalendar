@@ -185,7 +185,7 @@ def main(argv=None):
     now = datetime.now(timezone.utc)
     local_tz = resolve_local_timezone()
 
-    return run(Gws(cfg["profile"]), cfg, now, out_path, local_tz)
+    return run(Gws(cfg["profile"], binary=cfg["gwsPath"]), cfg, now, out_path, local_tz)
 
 
 if __name__ == "__main__":

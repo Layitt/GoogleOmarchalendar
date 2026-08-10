@@ -120,3 +120,14 @@ class TestWindowBounds(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestGwsPath(unittest.TestCase):
+    def test_defaults_to_the_bare_name(self):
+        self.assertEqual(config.DEFAULTS["gwsPath"], "gws")
+
+    def test_an_absolute_path_is_kept(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "c.json"
+            path.write_text(json.dumps({"gwsPath": "/opt/bin/gws"}))
+            self.assertEqual(config.load(path)["gwsPath"], "/opt/bin/gws")

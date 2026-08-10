@@ -200,3 +200,30 @@ class TestErrors(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestConfigurableBinary(unittest.TestCase):
+    def test_defaults_to_the_bare_name(self):
+        runner = FakeRunner({"--version": (0, "gws 0.13.2\n", "")})
+        gws.Gws("/tmp/profile", runner=runner).version()
+        self.assertEqual(runner.calls[0][0][0], "gws")
+
+    def test_uses_an_absolute_path_when_configured(self):
+        runner = FakeRunner({"--version": (0, "gws 0.13.2\n", "")})
+        gws.Gws("/tmp/profile", runner=runner, binary="/opt/bin/gws").version()
+        self.assertEqual(runner.calls[0][0][0], "/opt/bin/gws")
+
+    def test_empty_binary_falls_back_to_the_bare_name(self):
+        runner = FakeRunner({"--version": (0, "gws 0.13.2\n", "")})
+        gws.Gws("/tmp/profile", runner=runner, binary="").version()
+        self.assertEqual(runner.calls[0][0][0], "gws")
+
+    def test_missing_binary_message_names_it_and_explains_path(self):
+        def runner(argv, env):
+            raise FileNotFoundError(argv[0])
+
+        with self.assertRaises(gws.GwsMissing) as caught:
+            gws.Gws("/tmp/profile", runner=runner, binary="/opt/bin/gws").check()
+        message = str(caught.exception)
+        self.assertIn("/opt/bin/gws", message)
+        self.assertIn("gwsPath", message)

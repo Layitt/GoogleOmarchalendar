@@ -94,6 +94,26 @@ step "Verifying calendar access"
 GOOGLE_WORKSPACE_CLI_CONFIG_DIR="$PROFILE" gws calendar calendarList list \
   | python3 -c 'import json,sys; d=json.load(sys.stdin); print(len(d.get("items",[])), "calendars reachable")'
 
+step "Recording where gws lives"
+# The timer runs without your shell PATH, so the bare name is not enough.
+gws_path=$(command -v gws)
+config="$HOME/.config/omarchy/calendar-sync.json"
+mkdir -p "$(dirname "$config")"
+python3 - "$config" "$gws_path" <<'PYEOF'
+import json, pathlib, sys
+
+path, gws_path = pathlib.Path(sys.argv[1]), sys.argv[2]
+config = {}
+if path.exists():
+    try:
+        config = json.loads(path.read_text())
+    except ValueError:
+        config = {}
+config["gwsPath"] = gws_path
+path.write_text(json.dumps(config, indent=2) + "\n")
+print("  gwsPath set to", gws_path)
+PYEOF
+
 step "Installing the systemd timer"
 mkdir -p "$HOME/.config/systemd/user"
 cp "$PLUGIN_DIR/sync/systemd/omarchy-calendar-sync."{service,timer} "$HOME/.config/systemd/user/"

@@ -42,17 +42,22 @@ def _subprocess_runner(argv, env):
 
 
 class Gws:
-    def __init__(self, profile, runner=None):
+    def __init__(self, profile, runner=None, binary="gws"):
         self.profile = str(profile)
+        self.binary = str(binary or "gws")
         self._runner = runner or _subprocess_runner
 
     def _run(self, args):
         env = dict(os.environ)
         env["GOOGLE_WORKSPACE_CLI_CONFIG_DIR"] = self.profile
         try:
-            code, stdout, stderr = self._runner(["gws", *args], env)
+            code, stdout, stderr = self._runner([self.binary, *args], env)
         except FileNotFoundError as error:
-            raise GwsMissing("gws is not installed or not on PATH") from error
+            raise GwsMissing(
+                f"{self.binary} is not installed or not on PATH. "
+                "A systemd user service does not inherit your shell PATH, so set "
+                "gwsPath to an absolute path in calendar-sync.json."
+            ) from error
         return code, stdout, stderr
 
     def version(self):
