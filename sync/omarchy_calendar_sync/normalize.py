@@ -36,7 +36,15 @@ def normalize_event(gevent, calendar, tz):
     try:
         start_dt, all_day = _parse_endpoint(start_node, tz)
         end_dt, _ = _parse_endpoint(end_node, tz)
-    except (KeyError, ValueError):
+    except (KeyError, ValueError, TypeError):
+        return []
+
+    if all_day:
+        # Google's all-day end.date must be strictly after start.date.
+        if end_dt.date() <= start_dt.date():
+            return []
+    elif end_dt < start_dt:
+        # A zero-length timed event (end == start) is a legal marker.
         return []
 
     title = (gevent.get("summary") or "").strip() or NO_TITLE
@@ -66,7 +74,13 @@ def _parse_endpoint(node, tz):
     if "date" in node:
         parsed = date.fromisoformat(node["date"])
         return datetime(parsed.year, parsed.month, parsed.day, tzinfo=tz), True
-    return datetime.fromisoformat(node["dateTime"]).astimezone(tz), False
+    parsed_dt = datetime.fromisoformat(node["dateTime"])
+    if parsed_dt.tzinfo is None:
+        # A naive dateTime has no offset. Guessing the system timezone
+        # would make output depend on the machine running this code, so
+        # treat it as unusable instead.
+        raise ValueError("dateTime has no timezone offset")
+    return parsed_dt.astimezone(tz), False
 
 
 def _covered_days(start_dt, end_dt, all_day):

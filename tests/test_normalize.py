@@ -4,6 +4,7 @@ from zoneinfo import ZoneInfo
 from omarchy_calendar_sync import normalize
 
 BOGOTA = ZoneInfo("America/Bogota")
+NEW_YORK = ZoneInfo("America/New_York")
 CAL = {"id": "cal@example.com", "name": "Personal", "color": "#f83a22"}
 
 
@@ -68,6 +69,36 @@ class TestTimedEvents(unittest.TestCase):
         )
         self.assertEqual({r["id"] for r in rows}, {"evt1"})
 
+    def test_end_before_start_produces_no_rows(self):
+        rows = normalize.normalize_event(
+            timed("2026-08-10T20:15:00-05:00", "2026-08-10T19:15:00-05:00"), CAL, BOGOTA
+        )
+        self.assertEqual(rows, [])
+
+    def test_end_equal_to_start_still_produces_one_row(self):
+        # A zero-length event is a legal marker, deliberately not rejected.
+        rows = normalize.normalize_event(
+            timed("2026-08-10T19:15:00-05:00", "2026-08-10T19:15:00-05:00"), CAL, BOGOTA
+        )
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(rows[0]["dateKey"], "2026-08-10")
+
+    def test_naive_datetime_without_offset_produces_no_rows(self):
+        # No UTC offset means the result would depend on the machine's local
+        # timezone, so the event must be dropped instead of guessed at.
+        rows = normalize.normalize_event(
+            timed("2026-08-10T19:15:00", "2026-08-10T20:15:00"), CAL, BOGOTA
+        )
+        self.assertEqual(rows, [])
+
+    def test_spring_forward_transition_converts_correctly_on_both_sides(self):
+        # US DST starts 2026-03-08 at 07:00 UTC (02:00 EST jumps to 03:00 EDT).
+        # Start is before that instant (EST, UTC-5); end is after it (EDT, UTC-4).
+        rows = normalize.normalize_event(
+            timed("2026-03-08T04:30:00Z", "2026-03-08T09:30:00Z"), CAL, NEW_YORK
+        )
+        self.assertEqual([r["dateKey"] for r in rows], ["2026-03-07", "2026-03-08"])
+
 
 class TestAllDayEvents(unittest.TestCase):
     def test_single_all_day_uses_exclusive_end(self):
@@ -80,6 +111,14 @@ class TestAllDayEvents(unittest.TestCase):
         self.assertEqual(
             [r["dateKey"] for r in rows], ["2026-08-17", "2026-08-18", "2026-08-19"]
         )
+
+    def test_end_date_equal_to_start_date_produces_no_rows(self):
+        rows = normalize.normalize_event(all_day("2026-08-17", "2026-08-17"), CAL, BOGOTA)
+        self.assertEqual(rows, [])
+
+    def test_end_date_before_start_date_produces_no_rows(self):
+        rows = normalize.normalize_event(all_day("2026-08-17", "2026-08-16"), CAL, BOGOTA)
+        self.assertEqual(rows, [])
 
 
 class TestFiltering(unittest.TestCase):
@@ -114,6 +153,15 @@ class TestFiltering(unittest.TestCase):
             timed("2026-08-10T19:15:00-05:00", "2026-08-10T20:15:00-05:00"), CAL, BOGOTA
         )
         self.assertEqual(rows[0]["location"], "")
+
+    def test_start_date_of_none_produces_no_rows(self):
+        # A malformed start node must be dropped, not raise.
+        event = {"id": "evt3", "status": "confirmed", "start": {"date": None}}
+        try:
+            rows = normalize.normalize_event(event, CAL, BOGOTA)
+        except Exception as exc:  # noqa: BLE001
+            self.fail(f"normalize_event raised {exc!r} instead of dropping the event")
+        self.assertEqual(rows, [])
 
 
 class TestNormalizeAll(unittest.TestCase):
