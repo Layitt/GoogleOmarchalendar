@@ -116,3 +116,165 @@ test('dateFromKey returns the fallback for non-numeric parts', () => {
   const fallback = new Date(2000, 0, 1)
   assert.equal(Model.dateFromKey('yyyy-mm-dd', fallback), fallback)
 })
+
+const DOC = {
+  version: 1,
+  events: [
+    { id: 'a', calendarId: 'work@x', calendarName: 'Destify', color: '#ffad46', dateKey: '2026-08-10' },
+    { id: 'b', calendarId: 'moon@x', calendarName: 'Phases of the Moon', color: '#fad165', dateKey: '2026-08-10' },
+    { id: 'c', calendarId: 'work@x', calendarName: 'Destify', color: '#ffad46', dateKey: '2026-08-11' }
+  ]
+}
+
+test('calendarsInDocument lists each calendar once, sorted by name', () => {
+  assert.deepEqual(Model.calendarsInDocument(DOC), [
+    { id: 'work@x', name: 'Destify', color: '#ffad46' },
+    { id: 'moon@x', name: 'Phases of the Moon', color: '#fad165' }
+  ])
+})
+
+test('calendarsInDocument tolerates a null document', () => {
+  assert.deepEqual(Model.calendarsInDocument(null), [])
+  assert.deepEqual(Model.calendarsInDocument({}), [])
+})
+
+test('toggleHiddenCalendar adds then removes', () => {
+  const once = Model.toggleHiddenCalendar([], 'moon@x')
+  assert.deepEqual(once, ['moon@x'])
+  assert.deepEqual(Model.toggleHiddenCalendar(once, 'moon@x'), [])
+})
+
+test('toggleHiddenCalendar does not mutate its input', () => {
+  const before = ['moon@x']
+  Model.toggleHiddenCalendar(before, 'work@x')
+  assert.deepEqual(before, ['moon@x'])
+})
+
+test('toggleHiddenCalendar tolerates a null list', () => {
+  assert.deepEqual(Model.toggleHiddenCalendar(null, 'moon@x'), ['moon@x'])
+})
+
+test('visibleEvents drops hidden calendars only', () => {
+  const visible = Model.visibleEvents(DOC.events, ['moon@x'])
+  assert.equal(visible.length, 2)
+  assert.ok(visible.every(e => e.calendarId === 'work@x'))
+})
+
+test('visibleEvents returns everything when nothing is hidden', () => {
+  assert.equal(Model.visibleEvents(DOC.events, []).length, 3)
+  assert.equal(Model.visibleEvents(DOC.events, null).length, 3)
+})
+
+test('isCalendarHidden matches by id', () => {
+  assert.equal(Model.isCalendarHidden(['moon@x'], 'moon@x'), true)
+  assert.equal(Model.isCalendarHidden(['moon@x'], 'work@x'), false)
+  assert.equal(Model.isCalendarHidden([], 'work@x'), false)
+})
+
+const NOW = Date.parse('2026-08-10T09:00:00-05:00')
+const at = (iso, extra = {}) => ({ id: iso, title: 'X', start: iso, allDay: false, ...extra })
+
+test('nextEvent picks the soonest future event', () => {
+  const events = [
+    at('2026-08-10T18:00:00-05:00', { title: 'Later' }),
+    at('2026-08-10T10:00:00-05:00', { title: 'Soon' }),
+    at('2026-08-10T08:00:00-05:00', { title: 'Past' })
+  ]
+  assert.equal(Model.nextEvent(events, NOW).title, 'Soon')
+})
+
+test('nextEvent ignores events already started', () => {
+  assert.equal(Model.nextEvent([at('2026-08-10T08:59:00-05:00')], NOW), null)
+})
+
+test('nextEvent ignores all-day events', () => {
+  const events = [at('2026-08-10T00:00:00-05:00', { allDay: true }), at('2026-08-10T23:00:00-05:00', { title: 'Real' })]
+  assert.equal(Model.nextEvent(events, NOW).title, 'Real')
+})
+
+test('nextEvent ignores unparseable starts', () => {
+  assert.equal(Model.nextEvent([at('not a date')], NOW), null)
+})
+
+test('nextEvent returns null on an empty or null list', () => {
+  assert.equal(Model.nextEvent([], NOW), null)
+  assert.equal(Model.nextEvent(null, NOW), null)
+})
+
+test('formatCountdown renders minutes, hours and now', () => {
+  assert.equal(Model.formatCountdown(30 * 1000), 'now')
+  assert.equal(Model.formatCountdown(10 * 60 * 1000), 'in 10min')
+  assert.equal(Model.formatCountdown(60 * 60 * 1000), 'in 1h')
+  assert.equal(Model.formatCountdown(72 * 60 * 1000), 'in 1h 12min')
+})
+
+test('formatCountdown gives up past a day and on bad input', () => {
+  assert.equal(Model.formatCountdown(25 * 60 * 60 * 1000), null)
+  assert.equal(Model.formatCountdown(-1), null)
+  assert.equal(Model.formatCountdown(null), null)
+  assert.equal(Model.formatCountdown(NaN), null)
+})
+
+test('shouldAnnounce only fires inside the lead window', () => {
+  const soon = at('2026-08-10T09:10:00-05:00')
+  const far = at('2026-08-10T12:00:00-05:00')
+  assert.equal(Model.shouldAnnounce(soon, NOW, 15), true)
+  assert.equal(Model.shouldAnnounce(soon, NOW, 5), false)
+  assert.equal(Model.shouldAnnounce(far, NOW, 15), false)
+  assert.equal(Model.shouldAnnounce(null, NOW, 15), false)
+})
+
+test('millisUntil is null for an unreadable start', () => {
+  assert.equal(Model.millisUntil(at('nope'), NOW), null)
+  assert.equal(Model.millisUntil(null, NOW), null)
+})
+
+test('nextEventToday ignores events on other days', () => {
+  const events = [
+    at('2026-08-11T09:00:00-05:00', { title: 'Tomorrow' }),
+    at('2026-08-10T18:00:00-05:00', { title: 'Tonight' })
+  ]
+  events[0].dateKey = '2026-08-11'
+  events[1].dateKey = '2026-08-10'
+  assert.equal(Model.nextEventToday(events, NOW, '2026-08-10').title, 'Tonight')
+})
+
+test('nextEventToday returns null once the day is done', () => {
+  const tomorrow = at('2026-08-11T09:00:00-05:00')
+  tomorrow.dateKey = '2026-08-11'
+  assert.equal(Model.nextEventToday([tomorrow], NOW, '2026-08-10'), null)
+})
+
+test('announceLabel keeps the clock and appends the event', () => {
+  assert.equal(
+    Model.announceLabel('lundi 15:46', 'Standup', 'in 10min'),
+    'lundi 15:46  ·  Standup in 10min'
+  )
+})
+
+test('announceLabel returns the clock alone when nothing is announced', () => {
+  assert.equal(Model.announceLabel('lundi 15:46', 'Standup', ''), 'lundi 15:46')
+  assert.equal(Model.announceLabel('lundi 15:46', 'Standup', null), 'lundi 15:46')
+})
+
+test('announceLabel falls back to the clock when the title is empty', () => {
+  assert.equal(Model.announceLabel('lundi 15:46', '', 'in 10min'), 'lundi 15:46')
+})
+
+test('truncateTitle only cuts what is too long', () => {
+  assert.equal(Model.truncateTitle('Standup', 28), 'Standup')
+  assert.equal(Model.truncateTitle('a'.repeat(40), 10), 'a'.repeat(9) + '…')
+})
+
+test('truncateTitle cuts mid-word rather than hunting for a boundary', () => {
+  assert.equal(Model.truncateTitle('Design process solution here', 12), 'Design proc…')
+})
+
+test('truncateTitle does not leave a dangling space before the ellipsis', () => {
+  // The cut lands exactly on the space after "Design".
+  assert.equal(Model.truncateTitle('Design process', 8), 'Design…')
+})
+
+test('truncateTitle tolerates null', () => {
+  assert.equal(Model.truncateTitle(null, 10), '')
+})

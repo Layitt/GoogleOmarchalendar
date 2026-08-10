@@ -292,6 +292,157 @@ function eventsForDateKey(index, dateKey) {
   return index[dateKey] || []
 }
 
+// The calendars present in a synced document, in display order, each with
+// the colour the sync resolved for it. Derived from the events themselves so
+// the widget needs no separate calendar list and no configuration file: it
+// can only ever offer you calendars you actually have events in.
+function calendarsInDocument(doc) {
+  var events = (doc && doc.events) || []
+  var byId = {}
+  var ordered = []
+
+  for (var i = 0; i < events.length; i++) {
+    var event = events[i]
+    var id = event && event.calendarId
+    if (!id || byId[id]) continue
+    byId[id] = true
+    ordered.push({
+      id: id,
+      name: event.calendarName || id,
+      color: event.color || ""
+    })
+  }
+
+  ordered.sort(function(a, b) {
+    return a.name.localeCompare(b.name)
+  })
+  return ordered
+}
+
+function isCalendarHidden(hidden, calendarId) {
+  if (!hidden || !hidden.length) return false
+  return hidden.indexOf(String(calendarId)) !== -1
+}
+
+// Returns a new list rather than mutating, so the caller can hand the result
+// straight to persistSettings without touching the settings object in place.
+function toggleHiddenCalendar(hidden, calendarId) {
+  var id = String(calendarId)
+  var next = []
+  var found = false
+
+  for (var i = 0; i < (hidden || []).length; i++) {
+    if (String(hidden[i]) === id) { found = true; continue }
+    next.push(hidden[i])
+  }
+
+  if (!found) next.push(id)
+  return next
+}
+
+function visibleEvents(events, hidden) {
+  if (!events || !events.length) return []
+  if (!hidden || !hidden.length) return events
+
+  var visible = []
+  for (var i = 0; i < events.length; i++) {
+    if (isCalendarHidden(hidden, events[i].calendarId)) continue
+    visible.push(events[i])
+  }
+  return visible
+}
+
+// ---- The next thing coming up.
+
+var MINUTE_MS = 60 * 1000
+var HOUR_MS = 60 * MINUTE_MS
+var DAY_MS = 24 * HOUR_MS
+
+// All-day events are deliberately excluded. They start at midnight, so a
+// countdown to one either reads as hours in the past or as tomorrow, and
+// neither tells you anything you wanted to know.
+function nextEvent(events, nowMs) {
+  var best = null
+  var bestMs = null
+
+  for (var i = 0; i < (events || []).length; i++) {
+    var event = events[i]
+    if (!event || event.allDay) continue
+
+    var startMs = Date.parse(event.start)
+    if (isNaN(startMs) || startMs < nowMs) continue
+
+    if (bestMs === null || startMs < bestMs) {
+      bestMs = startMs
+      best = event
+    }
+  }
+
+  return best
+}
+
+// The popup's "what is next" line is scoped to today on purpose. Something
+// eighteen hours out is tomorrow, and answering "what is next" with tomorrow
+// is noise when the day's agenda is listed right below it.
+function nextEventToday(events, nowMs, todayKey) {
+  var todays = []
+  for (var i = 0; i < (events || []).length; i++) {
+    if (events[i] && events[i].dateKey === todayKey) todays.push(events[i])
+  }
+  return nextEvent(todays, nowMs)
+}
+
+// Returns null past a day out, which is the caller's signal to show nothing
+// rather than a countdown nobody is acting on.
+function formatCountdown(deltaMs) {
+  if (deltaMs === null || isNaN(deltaMs) || deltaMs < 0 || deltaMs >= DAY_MS) return null
+  if (deltaMs < MINUTE_MS) return "now"
+
+  var minutes = Math.floor(deltaMs / MINUTE_MS)
+  if (minutes < 60) return "in " + minutes + "min"
+
+  var hours = Math.floor(minutes / 60)
+  var rest = minutes % 60
+  return rest === 0 ? "in " + hours + "h" : "in " + hours + "h " + rest + "min"
+}
+
+var MAX_ANNOUNCE_TITLE = 28
+
+// A bar label is a fixed budget of horizontal space shared with every other
+// widget, so a long event title has to give.
+function truncateTitle(title, limit) {
+  var text = String(title === undefined || title === null ? "" : title)
+  var max = limit || MAX_ANNOUNCE_TITLE
+  if (text.length <= max) return text
+  return text.substring(0, max - 1).replace(/\s+$/, "") + "…"
+}
+
+// The clock is kept rather than replaced. Giving it up was a real cost for a
+// widget whose whole job used to be telling the time, and there is room for
+// both.
+function announceLabel(clockText, title, countdown, limit) {
+  if (!countdown) return clockText
+  var shown = truncateTitle(title, limit)
+  if (!shown) return clockText
+  return clockText + "  ·  " + shown + " " + countdown
+}
+
+// How long until an event starts, or null when it cannot be read.
+function millisUntil(event, nowMs) {
+  if (!event) return null
+  var startMs = Date.parse(event.start)
+  if (isNaN(startMs)) return null
+  return startMs - nowMs
+}
+
+// The bar label only gives up the clock when something is close enough to
+// act on. Further out it stays a clock, which is what it is most of the day.
+function shouldAnnounce(event, nowMs, leadMinutes) {
+  var delta = millisUntil(event, nowMs)
+  if (delta === null || delta < 0) return false
+  return delta <= leadMinutes * MINUTE_MS
+}
+
 // Turn a YYYY-MM-DD key back into a local Date, for formatting a heading.
 // Built field by field rather than parsed from the string, because
 // new Date("2026-08-10") is UTC midnight and lands on the previous day for
@@ -359,6 +510,17 @@ if (typeof module !== "undefined") {
     isoWeekLiteral: isoWeekLiteral,
     indexEventsByDate: indexEventsByDate,
     dateFromKey: dateFromKey,
+    calendarsInDocument: calendarsInDocument,
+    nextEvent: nextEvent,
+    nextEventToday: nextEventToday,
+    formatCountdown: formatCountdown,
+    truncateTitle: truncateTitle,
+    announceLabel: announceLabel,
+    millisUntil: millisUntil,
+    shouldAnnounce: shouldAnnounce,
+    isCalendarHidden: isCalendarHidden,
+    toggleHiddenCalendar: toggleHiddenCalendar,
+    visibleEvents: visibleEvents,
     eventsForDateKey: eventsForDateKey,
     eventColors: eventColors,
     syncState: syncState

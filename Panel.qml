@@ -114,8 +114,65 @@ Panel {
 
     root.eventDoc = doc
     root.eventVersionMismatch = mismatch
-    root.eventIndex = Model.indexEventsByDate(doc ? doc.events : [])
+    root.rebuildIndex()
   }
+
+  // Flat, already filtered. BarWidget.qml reads this to work out what is
+  // coming up next, so the bar label can count down without the popup ever
+  // being opened.
+  property var visibleEventList: []
+
+  function rebuildIndex() {
+    var all = root.eventDoc ? root.eventDoc.events : []
+    root.visibleEventList = Model.visibleEvents(all, root.hiddenCalendars)
+    root.eventIndex = Model.indexEventsByDate(root.visibleEventList)
+  }
+
+  // Ticks every minute regardless of whether the day rolled over, which is
+  // what a countdown needs. `today` deliberately only moves at midnight.
+  property date nowTick: new Date()
+  readonly property var upcomingEvent: Model.nextEventToday(visibleEventList, nowTick.getTime(), todayKey)
+  readonly property string upcomingCountdown: Model.formatCountdown(Model.millisUntil(upcomingEvent, nowTick.getTime())) || ""
+
+  // The year and life bars are the upstream clock's, kept but opt-in. What
+  // most people want in that slot is what is coming up next, not how much of
+  // the year is gone.
+  readonly property bool showYearProgress: setting("showYearProgress", false)
+
+  // Hiding happens here rather than in the sync, so toggling a calendar back
+  // on is instant instead of waiting for the next fetch. The sync keeps
+  // pulling everything.
+  //
+  // Held as local state rather than read straight off `settings` on every
+  // access. Persisting round-trips through shell.json and comes back
+  // asynchronously, so a binding would still be serving the old value when a
+  // second click arrives, and the first toggle would be silently undone.
+  property var hiddenCalendars: []
+  readonly property var knownCalendars: Model.calendarsInDocument(eventDoc)
+
+  function adoptSettings() {
+    var stored = setting("hiddenCalendars", [])
+    root.hiddenCalendars = Array.isArray(stored) ? stored.slice() : []
+  }
+
+  function toggleCalendar(calendarId) {
+    root.hiddenCalendars = Model.toggleHiddenCalendar(root.hiddenCalendars, calendarId)
+    persistSettings({ hiddenCalendars: root.hiddenCalendars })
+  }
+
+  function toggleYearProgress() {
+    persistSettings({ showYearProgress: !root.showYearProgress })
+  }
+
+  function setAnnounceLeadMinutes(minutes) {
+    persistSettings({ announceLeadMinutes: minutes })
+  }
+
+  property bool settingsOpen: false
+
+  onHiddenCalendarsChanged: root.rebuildIndex()
+  onSettingsChanged: root.adoptSettings()
+  Component.onCompleted: root.adoptSettings()
 
 
   // Guarded so the widget renders before the bar is injected (the bar-widget
@@ -287,6 +344,8 @@ Panel {
     id: clock
     precision: SystemClock.Minutes
     onDateChanged: {
+      // Always, so the countdown moves even when the day has not.
+      root.nowTick = clock.date
       if (Model.keyForDate(clock.date) === String(root.todayKey)) return
       var followToday = root.viewingCurrentMonth
       root.today = clock.date
@@ -349,6 +408,18 @@ Panel {
             width: parent.width
             height: heroRow.height
 
+            // Sits in the hero's right margin rather than in the row itself,
+            // so turning it on and off never shifts the date off centre.
+            PanelActionButton {
+              anchors.right: parent.right
+              anchors.verticalCenter: parent.verticalCenter
+              iconText: root.settingsOpen ? "󰅖" : "󰒓"
+              tooltipText: root.settingsOpen ? "Back to calendar" : "Settings"
+              foreground: root.contentForeground
+              fontFamily: root.contentFontFamily
+              onClicked: root.settingsOpen = !root.settingsOpen
+            }
+
             Row {
               id: heroRow
               anchors.horizontalCenter: parent.horizontalCenter
@@ -406,6 +477,7 @@ Panel {
           //      a plain hairline said nothing, and whole days done
           //      over days in the year says the same thing louder.
           Item {
+            visible: !root.settingsOpen
             width: parent.width
             height: yearBlock.y + yearBlock.height
 
@@ -417,8 +489,48 @@ Panel {
               height: Math.max(yearLabel.implicitHeight, Style.space(10))
 
               TapHandler {
-                enabled: !root.editingLife
+                enabled: root.showYearProgress && !root.editingLife
                 onDoubleTapped: root.startEditingLife()
+              }
+
+              // ---- What is coming up, in the slot the year bar used to own.
+              //      Reads as a sentence rather than a gauge, because the
+              //      answer people want here is "what next", not "how far in".
+              Row {
+                visible: !root.showYearProgress
+                anchors.left: parent.left
+                anchors.right: parent.right
+                anchors.verticalCenter: parent.verticalCenter
+                spacing: Style.space(4)
+
+                Rectangle {
+                  anchors.verticalCenter: parent.verticalCenter
+                  visible: root.upcomingEvent !== null
+                  width: Style.space(4)
+                  height: width
+                  radius: width / 2
+                  color: root.upcomingEvent ? root.upcomingEvent.color : "transparent"
+                }
+
+                Text {
+                  anchors.verticalCenter: parent.verticalCenter
+                  width: parent.width - Style.space(70)
+                  text: root.upcomingEvent ? root.upcomingEvent.title : qsTr("Nothing else today")
+                  color: root.upcomingEvent
+                    ? root.contentForeground
+                    : Qt.darker(root.contentForeground, 1.9)
+                  font.family: root.contentFontFamily
+                  font.pixelSize: Style.font.bodySmall
+                  elide: Text.ElideRight
+                }
+
+                Text {
+                  anchors.verticalCenter: parent.verticalCenter
+                  text: root.upcomingCountdown
+                  color: Qt.darker(root.contentForeground, 1.4)
+                  font.family: root.contentFontFamily
+                  font.pixelSize: Style.font.bodySmall
+                }
               }
 
               Row {
@@ -474,7 +586,7 @@ Panel {
 
               Text {
                 id: yearLabel
-                visible: !root.editingLife
+                visible: root.showYearProgress && !root.editingLife
                 anchors.left: parent.left
                 anchors.verticalCenter: parent.verticalCenter
                 text: root.today.getFullYear()
@@ -486,7 +598,7 @@ Panel {
 
               Text {
                 id: yearPercent
-                visible: !root.editingLife
+                visible: root.showYearProgress && !root.editingLife
                 anchors.right: parent.right
                 anchors.verticalCenter: parent.verticalCenter
                 text: root.yearDonePercent + "%"
@@ -497,7 +609,7 @@ Panel {
 
               Rectangle {
                 id: yearTrack
-                visible: !root.editingLife
+                visible: root.showYearProgress && !root.editingLife
                 anchors.left: yearLabel.right
                 anchors.right: yearPercent.left
                 anchors.leftMargin: Style.space(12)
@@ -523,7 +635,7 @@ Panel {
           //      given an age; the same rail as the year above it, measured
           //      against a nominal lifetime.
           Item {
-            visible: root.birthYear > 0
+            visible: !root.settingsOpen && root.showYearProgress && root.birthYear > 0
             width: parent.width
             height: visible ? lifeBlock.height : 0
 
@@ -597,6 +709,7 @@ Panel {
           //      the seven day columns. Always six rows, so the popup is
           //      exactly as tall in February as it is in August.
           Item {
+            visible: !root.settingsOpen
             width: parent.width
             height: gridColumn.y + gridColumn.height
 
@@ -793,6 +906,7 @@ Panel {
           //      The label is centered and fixed-width, so it holds still
           //      from "MAY" to "SEPTEMBER".
           Item {
+            visible: !root.settingsOpen
             width: parent.width
             height: monthNav.height
 
@@ -847,6 +961,7 @@ Panel {
           //      the selection survives stepping to another month and an
           //      undated list would then be a quiet lie.
           Column {
+            visible: !root.settingsOpen
             width: gridColumn.width
             anchors.horizontalCenter: parent.horizontalCenter
             spacing: Style.space(4)
@@ -931,6 +1046,35 @@ Panel {
                     ? qsTr("Calendar may be out of date. Check journalctl --user -u omarchy-calendar-sync")
                     : qsTr("Nothing scheduled")
             }
+
+          }
+
+          // ---- Settings, shown in place of the grid. Everything it changes
+          //      is owned by this panel and persisted to shell.json here, so
+          //      the view stays a pure read-and-emit surface.
+          SettingsView {
+            visible: root.settingsOpen
+            width: gridColumn.width
+            anchors.horizontalCenter: parent.horizontalCenter
+
+            foreground: root.contentForeground
+            fontFamily: root.contentFontFamily
+
+            calendars: root.knownCalendars
+            hiddenCalendars: root.hiddenCalendars
+            showYearProgress: root.showYearProgress
+            announceLeadMinutes: root.setting("announceLeadMinutes", 15)
+
+            syncState: root.syncState
+            eventCount: root.eventDoc && root.eventDoc.events ? root.eventDoc.events.length : 0
+            sourceLabel: root.eventDoc ? String(root.eventDoc.source || "") : ""
+            syncedAt: root.eventDoc && root.eventDoc.syncedAt
+              ? Qt.formatDateTime(new Date(root.eventDoc.syncedAt), "d MMM HH:mm")
+              : ""
+
+            onCalendarToggled: function(calendarId) { root.toggleCalendar(calendarId) }
+            onYearProgressToggled: root.toggleYearProgress()
+            onLeadMinutesPicked: function(minutes) { root.setAnnounceLeadMinutes(minutes) }
           }
         }
       }
