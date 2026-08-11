@@ -58,24 +58,48 @@ fi
 
 step "Creating project $PROJECT_ID"
 gcloud projects describe "$PROJECT_ID" >/dev/null 2>&1 \
-  || gcloud projects create "$PROJECT_ID" --name="Omarchy Calendar Sync"
+  || gcloud projects create "$PROJECT_ID" --name="$PROJECT_ID"
 gcloud config set project "$PROJECT_ID"
 
 step "Enabling the Calendar API"
 gcloud services enable calendar-json.googleapis.com --project="$PROJECT_ID"
 
-step "Manual step 1 of 3: configure the OAuth consent screen"
+step "Manual step 1 of 4: configure the OAuth consent screen"
 cat <<EOF
 Open:
-  https://console.cloud.google.com/apis/credentials/consent?project=$PROJECT_ID
+  https://console.cloud.google.com/auth/overview?project=$PROJECT_ID
 
-  User type:     External
-  App name:      Omarchy Calendar
-  Support email: your own address
+  If you land on a "Get started" form, fill it in:
+    App name:            Omarchy Calendar
+    User support email:  your own address
+    Audience:            External
+    Contact information: your own address
+
+  If you land on an "OAuth Overview" page with metrics instead, this project
+  is already configured and there is nothing to do here.
 EOF
 pause
 
-step "Manual step 2 of 3: publish the app"
+step "Manual step 2 of 4: declare the calendar scope"
+cat <<EOF
+Open:
+  https://console.cloud.google.com/auth/scopes?project=$PROJECT_ID
+
+  Click "Add or remove scopes"
+  Filter for:  calendar.readonly
+  Tick:        $SCOPE
+               ("See and download any calendar you can access")
+  Update, then Save
+
+Do not skip this. A scope that is not declared here is not offered on the
+consent screen at all, so there is no box to tick, Google grants only your
+email address, and every sync fails with 403 insufficient scopes. Google will
+warn that sensitive scopes need verification; that is expected and harmless
+for personal use, which stays under the unverified cap.
+EOF
+pause
+
+step "Manual step 3 of 4: publish the app"
 cat <<EOF
 On the Audience page, click "Publish app" to move from Testing to In production.
 
@@ -85,12 +109,12 @@ warning screen and then work indefinitely for personal use.
 EOF
 pause
 
-step "Manual step 3 of 3: create a Desktop OAuth client"
+step "Manual step 4 of 4: create a Desktop OAuth client"
 cat <<EOF
 Open:
-  https://console.cloud.google.com/apis/credentials?project=$PROJECT_ID
+  https://console.cloud.google.com/auth/clients?project=$PROJECT_ID
 
-  Create Credentials -> OAuth client ID
+  Create client
   Application type:  Desktop app
   Name:              Omarchy Calendar Sync
 
