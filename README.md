@@ -1,6 +1,10 @@
 # Calendar for Omarchy
 
-A clock for your Omarchy bar that knows what is next.
+**Your Google Calendar, in your Omarchy bar.** A month view with your real
+events on it, and a bar that tells you what is coming before it starts.
+
+Not a Google user? It reads a plain JSON file, so khal, vdirsyncer, Nextcloud
+or an ICS feed work just as well. See [Use another source](#use-another-source).
 
 ![Preview](preview.png)
 

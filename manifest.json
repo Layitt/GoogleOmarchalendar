@@ -4,14 +4,16 @@
   "name": "Calendar",
   "version": "0.1.0",
   "author": "tmn73",
-  "description": "Clock with a calendar popup that shows your real events",
-  "kinds": ["bar-widget"],
+  "description": "Your Google Calendar in the bar, with a month view and a countdown to what is next",
+  "kinds": [
+    "bar-widget"
+  ],
   "entryPoints": {
     "barWidget": "BarWidget.qml"
   },
   "barWidget": {
     "displayName": "Calendar",
-    "description": "Clock with a calendar popup that shows your real events",
+    "description": "Your Google Calendar in the bar, with a month view and a countdown to what is next",
     "category": "Time",
     "allowMultiple": false,
     "defaults": {
@@ -20,11 +22,36 @@
       "verticalFormat": "HH\n-\nmm"
     },
     "schema": [
-      { "key": "format", "type": "string", "label": "Date format", "defaultValue": "dddd HH:mm" },
-      { "key": "formatAlt", "type": "string", "label": "Alternate format", "defaultValue": "d MMMM 'W'ww yyyy" },
-      { "key": "verticalFormat", "type": "string", "label": "Vertical bar format", "defaultValue": "HH\n-\nmm" },
-      { "key": "birthYear", "type": "number", "label": "Birth year", "defaultValue": 0 },
-      { "key": "lifeExpectancy", "type": "number", "label": "Life expectancy", "defaultValue": 0 }
+      {
+        "key": "format",
+        "type": "string",
+        "label": "Date format",
+        "defaultValue": "dddd HH:mm"
+      },
+      {
+        "key": "formatAlt",
+        "type": "string",
+        "label": "Alternate format",
+        "defaultValue": "d MMMM 'W'ww yyyy"
+      },
+      {
+        "key": "verticalFormat",
+        "type": "string",
+        "label": "Vertical bar format",
+        "defaultValue": "HH\n-\nmm"
+      },
+      {
+        "key": "birthYear",
+        "type": "number",
+        "label": "Birth year",
+        "defaultValue": 0
+      },
+      {
+        "key": "lifeExpectancy",
+        "type": "number",
+        "label": "Life expectancy",
+        "defaultValue": 0
+      }
     ]
   }
 }
