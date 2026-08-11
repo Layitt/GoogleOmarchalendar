@@ -116,15 +116,53 @@ fi
 chmod 600 "$PROFILE/client_secret.json"
 
 step "Signing in with read-only calendar access"
+cat <<'EOF'
+On the consent screen, TICK THE CHECKBOX granting read access to your
+calendars before clicking Continue. It is not ticked for you.
+
+Clicking Continue without it still reports a successful login, but grants only
+your email address, and every sync then fails with 403 insufficient scopes.
+EOF
 # gws caches the access token next to the credentials. A cache minted before
 # the calendar scope was granted keeps being served afterwards, and every
 # call fails with 403 insufficient scopes until it is cleared.
 rm -f "$PROFILE/token_cache.json"
 GOOGLE_WORKSPACE_CLI_CONFIG_DIR="$PROFILE" gws auth login --scopes "$SCOPE"
 
+step "Checking the calendar scope was actually granted"
+if ! GOOGLE_WORKSPACE_CLI_CONFIG_DIR="$PROFILE" gws auth status 2>/dev/null | grep -q "$SCOPE"; then
+  cat <<EOF
+
+The calendar scope was NOT granted. gws is holding a token that can only read
+your email address.
+
+This almost always means the calendar checkbox on the consent screen was left
+unticked. Run this script again and tick it.
+
+  granted scopes: $(GOOGLE_WORKSPACE_CLI_CONFIG_DIR="$PROFILE" gws auth status 2>/dev/null | grep -A6 '"scopes"' | grep googleapis || echo "identity only")
+EOF
+  exit 1
+fi
+echo "  calendar.readonly granted"
+
 step "Verifying calendar access"
-GOOGLE_WORKSPACE_CLI_CONFIG_DIR="$PROFILE" gws calendar calendarList list \
-  | python3 -c 'import json,sys; d=json.load(sys.stdin); print(len(d.get("items",[])), "calendars reachable")'
+# Surface a real error rather than reading `items` out of an error body and
+# reporting it as zero calendars.
+GOOGLE_WORKSPACE_CLI_CONFIG_DIR="$PROFILE" gws calendar calendarList list 2>/dev/null \
+  | python3 -c '
+import json, sys
+
+payload = json.load(sys.stdin)
+error = payload.get("error")
+if error:
+    print("  calendar access failed:", error.get("code"), error.get("message"))
+    raise SystemExit(1)
+
+count = len(payload.get("items", []))
+print(" ", count, "calendars reachable")
+if count == 0:
+    print("  That is unusual. Check that this Google account has any calendars.")
+'
 
 step "Recording where gws and your credentials live"
 # The timer runs without your shell PATH, so the bare name is not enough.
