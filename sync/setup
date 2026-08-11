@@ -3,8 +3,9 @@
 #
 # Automates: GCP project creation, Calendar API enablement, gws profile
 # layout, the scoped login, and the systemd timer.
-# Cannot automate: the OAuth consent screen, publishing to production, and
-# creating the Desktop OAuth client. Google exposes no API for those.
+# Cannot automate: the OAuth consent screen, declaring the calendar scope,
+# publishing to production, and creating the Desktop OAuth client. Google
+# exposes no API for any of those.
 
 set -euo pipefail
 
@@ -34,7 +35,7 @@ if [ ! -t 0 ]; then
   cat <<'EOF'
 Warning: stdin is not a terminal.
 
-Three of the steps below have to be done by hand in the Google Cloud Console,
+Four of the steps below have to be done by hand in the Google Cloud Console,
 and this run cannot pause to wait for you. Run this directly in a terminal for
 the guided flow.
 
