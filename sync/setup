@@ -92,6 +92,10 @@ Open:
                ("See and download any calendar you can access")
   Update, then Save
 
+  If Save is greyed out, fill in "How will the scopes be used?" with
+  something like: Read-only display of my own calendar in a desktop
+  status bar widget.
+
 Do not skip this. A scope that is not declared here is not offered on the
 consent screen at all, so there is no box to tick, Google grants only your
 email address, and every sync fails with 403 insufficient scopes. Google will
@@ -102,7 +106,13 @@ pause
 
 step "Manual step 3 of 4: publish the app"
 cat <<EOF
-On the Audience page, click "Publish app" to move from Testing to In production.
+Open:
+  https://console.cloud.google.com/auth/audience?project=$PROJECT_ID
+
+  Under "Publishing status", click "Publish app"
+
+  If it already reads "In production" there is nothing to do. The button
+  disappears once published and is replaced by "Back to testing".
 
 This matters. In Testing, Google expires refresh tokens after 7 days and your
 calendar silently stops updating. Unverified production apps show a one time
