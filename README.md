@@ -6,12 +6,12 @@ A clock for your Omarchy bar that knows what is next.
 
 It replaces the built-in clock rather than sitting beside it, so you keep one
 icon. Left click opens a month calendar with your real events on it. When
-something is close, the bar itself stops being just a clock and tells you.
+something is close, the bar itself stops being just a clock and tells you:
 
-```
-󰃰  monday 09:12                          most of the day
-󰃰  monday 09:12  ·  Standup in 10min     when something is coming
-```
+![The bar announcing the next event](docs/images/bar.png)
+
+The clock stays. This widget takes the desktop clock's place, so trading the
+time away for an event title would be a downgrade you pay for all day.
 
 ## Features
 
@@ -150,6 +150,8 @@ Rules a writer has to follow:
 ## Settings
 
 Click the clock, then the gear icon in the panel header.
+
+![The settings page](docs/images/settings.png)
 
 | Section | What it does |
 |---|---|
