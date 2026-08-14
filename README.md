@@ -198,6 +198,7 @@ systemctl --user list-timers omarchy-calendar-sync.timer
 | The panel says "No calendar synced yet" | The events file does not exist. The sync has never completed |
 | The panel says the calendar may be out of date | The file exists but `syncedAt` is old. Check the journal above |
 | An event shows up twice | Two of your calendars both carry it. Hide one in settings. The sync already drops exact duplicates by iCalUID and start time |
+| `The project ID you specified is already in use` during setup | Fixed in 0.1.1. Google Cloud project ids are unique across all of Google, and older versions hardcoded one. Update the plugin, or pass your own: `PROJECT_ID=something-unique sync/setup` |
 | Events are off by a day | Report it. Timezone handling resolves a named IANA zone precisely to avoid this, and there is a regression test for daylight saving transitions |
 
 ## Uninstall

@@ -9,7 +9,11 @@
 
 set -euo pipefail
 
-PROJECT_ID="${PROJECT_ID:-omarchy-calendar-sync}"
+# Deliberately empty by default. Google Cloud project ids are unique across
+# all of Google, not per account, so a hardcoded default works for exactly one
+# person on earth and fails for everyone after them. Resolved below, once we
+# know which projects this account already owns.
+PROJECT_ID="${PROJECT_ID:-}"
 PROFILE="${PROFILE:-$HOME/.config/gws-omarchy-calendar}"
 GCLOUD_CONFIG="${GCLOUD_CONFIG:-omarchy-calendar}"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -57,9 +61,40 @@ else
   gcloud auth login
 fi
 
-step "Creating project $PROJECT_ID"
-gcloud projects describe "$PROJECT_ID" >/dev/null 2>&1 \
-  || gcloud projects create "$PROJECT_ID" --name="$PROJECT_ID"
+step "Finding or creating the Google Cloud project"
+if [ -n "$PROJECT_ID" ]; then
+  echo "  using PROJECT_ID from your environment: $PROJECT_ID"
+  # An explicit id may or may not exist yet, and `describe` cannot tell
+  # "absent" from "someone else owns it", so only create when the account
+  # genuinely has no such project of its own.
+  if ! gcloud projects list --filter="projectId = $PROJECT_ID" --format='value(projectId)' | grep -q .; then
+    gcloud projects create "$PROJECT_ID" --name="$PROJECT_ID"
+  fi
+else
+  # Reuse the one this account already made, so rerunning does not litter the
+  # console with a new project every time.
+  PROJECT_ID=$(gcloud projects list --filter="projectId ~ ^omarchy-cal" --format='value(projectId)' --limit=1 2>/dev/null || true)
+
+  if [ -n "$PROJECT_ID" ]; then
+    echo "  reusing the project you already have: $PROJECT_ID"
+  else
+    # Random suffix rather than a name derived from the account, because ids
+    # are world visible and an email local part does not belong in one.
+    PROJECT_ID="omarchy-cal-$(od -An -N4 -tx1 /dev/urandom | tr -d ' \n')"
+    echo "  creating $PROJECT_ID"
+    if ! gcloud projects create "$PROJECT_ID" --name="Omarchy Calendar"; then
+      cat <<EOF
+
+Creating the project failed. Two common reasons:
+
+  - You are at Google's project quota. Delete an unused project, or pass one
+    you already own:  PROJECT_ID=my-existing-project $0
+  - The id collided. Simply run this again, the next id will differ.
+EOF
+      exit 1
+    fi
+  fi
+fi
 gcloud config set project "$PROJECT_ID"
 
 step "Enabling the Calendar API"
