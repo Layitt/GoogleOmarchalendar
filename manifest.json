@@ -4,7 +4,7 @@
   "name": "Calendar",
   "version": "0.2.0",
   "author": "tmn73",
-  "description": "Your Google Calendar in the bar, with a month view and a countdown to what is next",
+  "description": "Your Google Calendar in the bar. Your next meeting at a glance, and one click to join it.",
   "kinds": [
     "bar-widget"
   ],
@@ -13,7 +13,7 @@
   },
   "barWidget": {
     "displayName": "Calendar",
-    "description": "Your Google Calendar in the bar, with a month view and a countdown to what is next",
+    "description": "Your Google Calendar in the bar. Your next meeting at a glance, and one click to join it.",
     "category": "Time",
     "allowMultiple": false,
     "defaults": {
