@@ -6,3 +6,6 @@ node_modules/
 # Design notes and plans stay local, see ~/dev/omarchy-calendar-notes
 docs/design/
 docs/plans/
+*.bak
+*.tmp
+credentials.json

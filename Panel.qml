@@ -64,8 +64,8 @@ Panel {
   // starts out matching the rest of the desktop rather than a hardcoded
   // convention. Clicking the grid's "W" heading writes the choice back to
   // shell.json.
-  readonly property int weekStart: Model.normalizedWeekStart(setting("weekStartDay", null), Qt.locale().firstDayOfWeek)
-  readonly property string nextWeekStartLabel: Qt.locale().dayName(Model.toggledWeekStart(weekStart), Locale.LongFormat)
+  readonly property int weekStart: Model.normalizedWeekStart(setting("weekStartDay", null), 1)
+  readonly property string nextWeekStartLabel: Model.toggledWeekStart(weekStart) === 1 ? "lunes" : "domingo"
   readonly property var weekdays: Model.weekdayOrder(weekStart)
   readonly property var weeks: Model.monthGrid(viewYear, viewMonth, weekStart, todayKey, eventIndex)
 
@@ -95,9 +95,137 @@ Panel {
   property string selectedDayKey: todayKey
   readonly property var selectedEvents: Model.eventsForDateKey(eventIndex, selectedDayKey)
   readonly property date selectedDate: Model.dateFromKey(selectedDayKey, today)
+  property var weatherDoc: null
+  readonly property var selectedDayWeather: weatherDoc && weatherDoc.forecast ? weatherDoc.forecast[selectedDayKey] : null
+
+  function applyWeather(raw) {
+    if (!raw) {
+      root.weatherDoc = null
+      return
+    }
+    try {
+      root.weatherDoc = JSON.parse(raw)
+    } catch (e) {
+      root.weatherDoc = null
+    }
+  }
 
   function selectDay(key) {
     root.selectedDayKey = String(key)
+  }
+
+  // ---- Event Management Properties & Methods ----
+  property bool showingEventModal: false
+  property bool isEditingEvent: false
+  property string modalEventId: ""
+  property string modalCalendarId: "primary"
+  property string modalDate: ""
+  property string modalColorId: ""
+  property bool modalAllDay: false
+  property bool busyManagingEvent: false
+
+  Process {
+    id: manageEventsProc
+    property var pendingArgs: []
+    command: [(Quickshell.env("HOME") || "") + "/.config/omarchy/plugins/tmn73.calendar/sync/manage_events.py"].concat(pendingArgs)
+    onExited: {
+      root.busyManagingEvent = false
+      eventsFile.reload()
+    }
+  }
+
+  function openAddModal(dateKey) {
+    root.isEditingEvent = false
+    root.modalEventId = ""
+    root.modalCalendarId = "primary"
+    root.modalDate = dateKey || root.selectedDayKey || root.todayKey
+    root.modalColorId = ""
+    root.modalAllDay = false
+    modalTitleField.text = ""
+    modalLocationField.text = ""
+    modalStartTimeField.text = "10:00"
+    modalEndTimeField.text = "11:00"
+    root.showingEventModal = true
+    Qt.callLater(function() { modalTitleField.forceActiveFocus() })
+  }
+
+  function openEditModal(eventData) {
+    if (!eventData) return
+    root.isEditingEvent = true
+    root.modalEventId = String(eventData.id || "")
+    root.modalCalendarId = String(eventData.calendarId || "primary")
+    root.modalDate = String(eventData.dateKey || root.selectedDayKey)
+    root.modalColorId = String(eventData.colorId || "")
+    root.modalAllDay = !!eventData.allDay
+    modalTitleField.text = String(eventData.title || "")
+    modalLocationField.text = String(eventData.location || "")
+
+    if (eventData.allDay) {
+      modalStartTimeField.text = "10:00"
+      modalEndTimeField.text = "11:00"
+    } else {
+      var dStart = new Date(eventData.start)
+      var dEnd = new Date(eventData.end)
+      modalStartTimeField.text = Qt.formatDateTime(dStart, "HH:mm")
+      modalEndTimeField.text = Qt.formatDateTime(dEnd, "HH:mm")
+    }
+
+    root.showingEventModal = true
+    Qt.callLater(function() { modalTitleField.forceActiveFocus() })
+  }
+
+  function closeEventModal() {
+    root.showingEventModal = false
+    Qt.callLater(function() { if (keyCatcher) keyCatcher.forceActiveFocus() })
+  }
+
+  function commitEventModal() {
+    var title = modalTitleField.text.trim()
+    if (!title) return
+    var loc = modalLocationField.text.trim()
+    var sTime = root.modalAllDay ? "" : modalStartTimeField.text.trim()
+    var eTime = root.modalAllDay ? "" : modalEndTimeField.text.trim()
+
+    root.busyManagingEvent = true
+    if (root.isEditingEvent) {
+      manageEventsProc.pendingArgs = [
+        "update",
+        "--calendar-id", root.modalCalendarId,
+        "--event-id", root.modalEventId,
+        "--title", title,
+        "--date", root.modalDate,
+        "--start-time", sTime,
+        "--end-time", eTime,
+        "--location", loc,
+        "--color-id", root.modalColorId
+      ]
+    } else {
+      manageEventsProc.pendingArgs = [
+        "add",
+        "--calendar-id", root.modalCalendarId,
+        "--title", title,
+        "--date", root.modalDate,
+        "--start-time", sTime,
+        "--end-time", eTime,
+        "--location", loc,
+        "--color-id", root.modalColorId
+      ]
+    }
+    manageEventsProc.running = false
+    manageEventsProc.running = true
+    root.closeEventModal()
+  }
+
+  function deleteEvent(eventData) {
+    if (!eventData || !eventData.id) return
+    root.busyManagingEvent = true
+    manageEventsProc.pendingArgs = [
+      "delete",
+      "--calendar-id", eventData.calendarId || "primary",
+      "--event-id", eventData.id
+    ]
+    manageEventsProc.running = false
+    manageEventsProc.running = true
   }
 
   function applyEvents(raw) {
@@ -361,14 +489,70 @@ Panel {
     cancelEditingLife()
   }
 
+  readonly property string language: setting("language", "es")
+  readonly property string weatherLocation: setting("weatherLocation", "")
+
+  function setLanguage(lang) {
+    persistSettings({ language: lang })
+    weatherFetcherProc.running = false
+    weatherFetcherProc.running = true
+  }
+
+  function setWeatherLocation(loc) {
+    persistSettings({ weatherLocation: loc })
+    weatherFetcherProc.running = false
+    weatherFetcherProc.running = true
+  }
+
   function toggleWeekStart() {
     setWeekStart(Model.toggledWeekStart(root.weekStart))
   }
 
-  // Locale short day names, trimmed of the trailing period some locales
-  // carry ("man." -> "MAN") so the header row stays a clean band of caps.
+  function formatMonthYear(d) {
+    if (root.language === "en") {
+      var enMonths = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
+      return enMonths[d.getMonth()] + " " + d.getFullYear();
+    }
+    var months = ["Enero", "Febrero", "Marzo", "Abril", "Mayo", "Junio", "Julio", "Agosto", "Septiembre", "Octubre", "Noviembre", "Diciembre"];
+    return months[d.getMonth()] + " " + d.getFullYear();
+  }
+
+  function formatHeroDate(d) {
+    if (root.language === "en") {
+      var enMonths = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
+      return enMonths[d.getMonth()] + " " + d.getDate();
+    }
+    var months = ["Enero", "Febrero", "Marzo", "Abril", "Mayo", "Junio", "Julio", "Agosto", "Septiembre", "Octubre", "Noviembre", "Diciembre"];
+    return d.getDate() + " de " + months[d.getMonth()];
+  }
+
+  function formatSelectedDate(d) {
+    if (root.language === "en") {
+      var enDays = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+      var enMonths = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+      return enDays[d.getDay()] + " " + enMonths[d.getMonth()] + " " + d.getDate();
+    }
+    var days = ["Dom", "Lun", "Mar", "Mié", "Jue", "Vie", "Sáb"];
+    var months = ["Ene", "Feb", "Mar", "Abr", "May", "Jun", "Jul", "Ago", "Sep", "Oct", "Nov", "Dic"];
+    return days[d.getDay()] + " " + d.getDate() + " " + months[d.getMonth()];
+  }
+
+  function formatSyncedAt(d) {
+    var esMonths = ["ene", "feb", "mar", "abr", "may", "jun", "jul", "ago", "sep", "oct", "nov", "dic"];
+    var enMonths = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+    var mName = root.language === "en" ? enMonths[d.getMonth()] : esMonths[d.getMonth()];
+    var h = String(d.getHours()).padStart(2, "0");
+    var m = String(d.getMinutes()).padStart(2, "0");
+    return d.getDate() + " " + mName + " " + h + ":" + m;
+  }
+
   function weekdayLabel(weekday) {
-    return String(Qt.locale().dayName(weekday, Locale.ShortFormat)).replace(/\.$/, "").toUpperCase()
+    if (root.language === "en") {
+      var enGridDays = ["SU", "MO", "TU", "WE", "TH", "FR", "SA"];
+      return enGridDays[weekday] || "";
+    }
+    var days = ["DO", "LU", "MA", "MI", "JU", "VI", "SÁ"];
+    return days[weekday] || "";
   }
 
   // watchChanges is the point of this whole widget. The sync rewrites the
@@ -384,6 +568,37 @@ Panel {
     onLoaded: root.applyEvents(text())
     onLoadFailed: root.applyEvents("")
     onFileChanged: reload()
+  }
+
+  Process {
+    id: weatherFetcherProc
+    command: [
+      (Quickshell.env("HOME") || "") + "/.config/omarchy/plugins/tmn73.calendar/sync/fetch_weather.py",
+      "--lang", root.language
+    ].concat(root.weatherLocation ? ["--location", root.weatherLocation] : [])
+    onExited: weatherFile.reload()
+  }
+
+  FileView {
+    id: weatherFile
+    path: (Quickshell.env("HOME") || "") + "/.local/state/omarchy/calendar-weather.json"
+    watchChanges: true
+    printErrors: false
+    onLoaded: root.applyWeather(text())
+    onLoadFailed: root.applyWeather("")
+    onFileChanged: reload()
+  }
+
+  Timer {
+    id: weatherTimer
+    interval: 1800000
+    running: true
+    repeat: true
+    triggeredOnStart: true
+    onTriggered: {
+      weatherFetcherProc.running = false
+      weatherFetcherProc.running = true
+    }
   }
 
   // Copying beats reading a long path back to yourself. Argv array rather than
@@ -434,7 +649,7 @@ Panel {
     PanelKeyCatcher {
       id: keyCatcher
       anchors.fill: parent
-      blocked: root.editingLife
+      blocked: root.editingLife || root.showingEventModal
       onMoveRequested: function(dx, dy) {
         if (dx !== 0) root.moveMonth(dx)
         if (dy !== 0) root.moveYear(dy)
@@ -449,6 +664,7 @@ Panel {
         else if (t === "}") root.moveYear(1)
         else if (t === "t" || t === "T") root.goToToday()
         else if (t === "w" || t === "W") root.toggleWeekStart()
+        else if (t === "a" || t === "A") root.openAddModal(root.selectedDayKey)
       }
 
       Flickable {
@@ -481,7 +697,9 @@ Panel {
               anchors.right: parent.right
               anchors.verticalCenter: parent.verticalCenter
               iconText: root.settingsOpen ? "󰅖" : "󰒓"
-              tooltipText: root.settingsOpen ? "Back to calendar" : "Settings"
+              tooltipText: root.settingsOpen
+                ? (root.language === "en" ? "Back to calendar" : "Volver al calendario")
+                : (root.language === "en" ? "Settings" : "Configuración")
               foreground: root.contentForeground
               fontFamily: root.contentFontFamily
               onClicked: root.settingsOpen = !root.settingsOpen
@@ -511,7 +729,7 @@ Panel {
               Text {
                 id: heroDate
                 anchors.verticalCenter: parent.verticalCenter
-                text: Qt.formatDate(root.today, "MMMM d")
+                text: root.formatHeroDate(root.today)
                 color: heroMouse.containsMouse
                   ? Style.hoverStateColor(root.contentForeground, Color.accent)
                   : root.contentForeground
@@ -534,7 +752,7 @@ Panel {
 
               PanelToolTip {
                 visible: heroMouse.containsMouse
-                text: "Back to today"
+                text: "Volver a hoy"
                 fontFamily: root.contentFontFamily
               }
             }
@@ -835,7 +1053,7 @@ Panel {
 
                   PanelToolTip {
                     visible: weekStartMouse.containsMouse
-                    text: "Start weeks on " + root.nextWeekStartLabel
+                    text: "Iniciar semanas en " + root.nextWeekStartLabel
                     fontFamily: root.contentFontFamily
                   }
                 }
@@ -947,6 +1165,7 @@ Panel {
 
                       TapHandler {
                         onTapped: root.selectDay(dayCell.modelData.key)
+                        onDoubleTapped: root.openAddModal(dayCell.modelData.key)
                       }
                     }
                   }
@@ -989,9 +1208,9 @@ Panel {
                 anchors.verticalCenter: parent.verticalCenter
                 // Fixed width so the chevrons hold still between a
                 // "MAY 2026" and a "SEPTEMBER 2026".
-                width: Style.space(130)
+                width: Style.space(160)
                 horizontalAlignment: Text.AlignHCenter
-                text: Qt.formatDate(root.viewDate, "MMMM yyyy").toUpperCase()
+                text: root.formatMonthYear(root.viewDate).toUpperCase()
                 color: Qt.darker(root.contentForeground, 1.4)
                 font.family: root.contentFontFamily
                 font.pixelSize: Style.font.body
@@ -1005,7 +1224,7 @@ Panel {
                 anchors.leftMargin: -Style.space(8)
                 anchors.verticalCenter: parent.verticalCenter
                 iconText: "󰅁"
-                tooltipText: "Previous month"
+                tooltipText: root.language === "en" ? "Previous month" : "Mes anterior"
                 foreground: root.contentForeground
                 fontFamily: root.contentFontFamily
                 onClicked: root.moveMonth(-1)
@@ -1016,7 +1235,7 @@ Panel {
                 anchors.rightMargin: -Style.space(8)
                 anchors.verticalCenter: parent.verticalCenter
                 iconText: "󰅂"
-                tooltipText: "Next month"
+                tooltipText: root.language === "en" ? "Next month" : "Mes siguiente"
                 foreground: root.contentForeground
                 fontFamily: root.contentFontFamily
                 onClicked: root.moveMonth(1)
@@ -1031,157 +1250,253 @@ Panel {
             visible: !root.settingsOpen
             width: gridColumn.width
             anchors.horizontalCenter: parent.horizontalCenter
-            spacing: Style.space(4)
+            spacing: Style.space(6)
 
-            Text {
+            Item {
               width: parent.width
-              text: Qt.formatDate(root.selectedDate, "dddd d MMMM").toUpperCase()
-              color: Qt.darker(root.contentForeground, 1.4)
-              font.family: root.contentFontFamily
-              font.pixelSize: Style.font.caption
-              font.letterSpacing: 1
-              font.bold: true
+              height: Style.space(24)
+
+              Text {
+                anchors.left: parent.left
+                anchors.right: weatherRow.visible ? weatherRow.left : addEventBtn.left
+                anchors.rightMargin: Style.space(8)
+                anchors.verticalCenter: parent.verticalCenter
+                text: root.formatSelectedDate(root.selectedDate).toUpperCase()
+                color: Qt.darker(root.contentForeground, 1.4)
+                font.family: root.contentFontFamily
+                font.pixelSize: Style.font.caption
+                font.letterSpacing: 1
+                font.bold: true
+                elide: Text.ElideRight
+              }
+
+              // Weather metrics aligned to the right with icons
+              Row {
+                id: weatherRow
+                anchors.right: addEventBtn.left
+                anchors.rightMargin: Style.space(8)
+                anchors.verticalCenter: parent.verticalCenter
+                spacing: Style.space(8)
+                visible: !!root.selectedDayWeather
+
+                // General weather condition with icon
+                Row {
+                  spacing: Style.space(3)
+                  anchors.verticalCenter: parent.verticalCenter
+
+                  Text {
+                    text: root.selectedDayWeather ? root.selectedDayWeather.icon : ""
+                    color: Color.accent
+                    font.family: root.contentFontFamily
+                    font.pixelSize: Style.font.bodySmall
+                    anchors.verticalCenter: parent.verticalCenter
+                  }
+
+                  Text {
+                    text: root.selectedDayWeather ? root.selectedDayWeather.weatherDesc : ""
+                    color: root.contentForeground
+                    font.family: root.contentFontFamily
+                    font.pixelSize: Style.font.caption
+                    font.bold: true
+                    anchors.verticalCenter: parent.verticalCenter
+                  }
+                }
+
+                // Temperature with thermometer icon
+                Row {
+                  visible: root.selectedDayWeather && root.selectedDayWeather.tempMax !== null
+                  spacing: Style.space(2)
+                  anchors.verticalCenter: parent.verticalCenter
+
+                  Text {
+                    text: "󰔏"
+                    color: Color.accent
+                    font.family: root.contentFontFamily
+                    font.pixelSize: Style.font.caption
+                    anchors.verticalCenter: parent.verticalCenter
+                  }
+
+                  Text {
+                    text: root.selectedDayWeather && root.selectedDayWeather.tempMax !== null
+                      ? (root.selectedDayWeather.tempMax + "°/" + root.selectedDayWeather.tempMin + "°C")
+                      : ""
+                    color: Qt.darker(root.contentForeground, 1.3)
+                    font.family: root.contentFontFamily
+                    font.pixelSize: Style.font.caption
+                    anchors.verticalCenter: parent.verticalCenter
+                  }
+                }
+
+                // Rain probability and peak hour with rain icon
+                Row {
+                  spacing: Style.space(2)
+                  anchors.verticalCenter: parent.verticalCenter
+
+                  Text {
+                    text: "󰖗"
+                    color: (root.selectedDayWeather && root.selectedDayWeather.rainProb >= 30) ? "#60a5fa" : Qt.darker(root.contentForeground, 1.6)
+                    font.family: root.contentFontFamily
+                    font.pixelSize: Style.font.caption
+                    anchors.verticalCenter: parent.verticalCenter
+                  }
+
+                  Text {
+                    text: {
+                      if (!root.selectedDayWeather) return ""
+                      if (root.selectedDayWeather.rainProb >= 25 && root.selectedDayWeather.peakHour) {
+                        return root.selectedDayWeather.rainProb + "% (" + root.selectedDayWeather.peakHour + " h)"
+                      } else if (root.selectedDayWeather.rainProb >= 15) {
+                        return root.selectedDayWeather.rainProb + "% (baja)"
+                      }
+                      return root.selectedDayWeather.rainProb + "% (sin lluvia)"
+                    }
+                    color: (root.selectedDayWeather && root.selectedDayWeather.rainProb >= 30) ? "#93c5fd" : Qt.darker(root.contentForeground, 1.4)
+                    font.family: root.contentFontFamily
+                    font.pixelSize: Style.font.caption
+                    font.bold: (root.selectedDayWeather && root.selectedDayWeather.rainProb >= 30)
+                    anchors.verticalCenter: parent.verticalCenter
+                  }
+                }
+              }
+
+              PanelActionButton {
+                id: addEventBtn
+                anchors.right: parent.right
+                anchors.verticalCenter: parent.verticalCenter
+                iconText: "󰐕"
+                tooltipText: root.language === "en" ? "Add event" : "Añadir evento"
+                foreground: root.contentForeground
+                fontFamily: root.contentFontFamily
+                onClicked: root.openAddModal(root.selectedDayKey)
+              }
             }
 
             Repeater {
               model: root.selectedEvents
 
-              // The hover wash lives on this wrapper, never inside the Row. A
-              // Row lays out every visible child, so an anchored background
-              // added as a Row child fights the layout and ejects the content.
+              // The hover wash lives on this wrapper, never inside the Row.
               Rectangle {
                 id: eventRow
                 required property var modelData
 
                 readonly property string meetingUrl: Model.meetingUrlFor(modelData)
                 readonly property bool declined: Model.isDeclined(modelData)
-                // Only around the actual time. A Join button on next week's
-                // meeting is noise that dilutes the one that matters.
                 readonly property bool joinable: Model.isJoinableNow(modelData, root.nowTick.getTime(), root.todayKey)
                 readonly property string eventUrl: Model.eventUrlFor(modelData)
                 readonly property bool openable: eventUrl !== ""
 
                 width: gridColumn.width
-                height: eventBody.height + Style.space(2)
+                height: eventBody.height + Style.space(4)
                 radius: Style.cornerRadius
                 color: eventHover.hovered
                   ? Qt.rgba(root.contentForeground.r, root.contentForeground.g,
                             root.contentForeground.b, 0.08)
                   : "transparent"
 
-                // Only rows that can actually do something respond to a click.
                 HoverHandler {
                   id: eventHover
-                  enabled: eventRow.openable || eventRow.joinable
                   cursorShape: Qt.PointingHandCursor
                 }
 
-                Rectangle {
-                  id: joinButton
-                  visible: eventRow.joinable
+                Row {
+                  id: actionButtons
                   anchors.right: parent.right
                   anchors.verticalCenter: parent.verticalCenter
-                  width: joinLabel.implicitWidth + Style.space(8)
-                  height: joinLabel.implicitHeight + Style.space(3)
-                  radius: height / 2
-                  color: joinHover.hovered
-                    ? Style.selectedStateColor(root.contentForeground, Color.accent)
-                    : "transparent"
-                  border.width: Style.spacing.hairline
-                  border.color: joinHover.hovered
-                    ? "transparent"
-                    : Qt.darker(root.contentForeground, 2.0)
+                  anchors.rightMargin: Style.space(4)
+                  spacing: Style.space(2)
 
-                  HoverHandler {
-                    id: joinHover
-                    cursorShape: Qt.PointingHandCursor
+                  PanelActionButton {
+                    visible: eventRow.joinable
+                    iconText: "󰍎"
+                    tooltipText: root.language === "en" ? "Join" : "Unirse"
+                    foreground: Color.accent
+                    fontFamily: root.contentFontFamily
+                    onClicked: root.openMeeting(eventRow.modelData)
                   }
 
-                  // Its own handler, declared on the button, so the grab
-                  // happens here and the row's opener does not also fire.
-                  TapHandler {
-                    gesturePolicy: TapHandler.ReleaseWithinBounds
-                    onTapped: root.openMeeting(eventRow.modelData)
+                  PanelActionButton {
+                    visible: eventHover.hovered
+                    iconText: "󰏫"
+                    tooltipText: root.language === "en" ? "Edit event" : "Editar evento"
+                    foreground: root.contentForeground
+                    fontFamily: root.contentFontFamily
+                    onClicked: root.openEditModal(eventRow.modelData)
                   }
 
-                  Text {
-                    id: joinLabel
-                    anchors.centerIn: parent
-                    text: qsTr("Join")
-                    color: joinHover.hovered ? Color.background : Qt.darker(root.contentForeground, 1.4)
-                    font.family: root.contentFontFamily
-                    font.pixelSize: Style.font.caption
+                  PanelActionButton {
+                    visible: eventHover.hovered
+                    iconText: "󰆴"
+                    tooltipText: root.language === "en" ? "Delete event" : "Eliminar evento"
+                    foreground: root.contentForeground
+                    fontFamily: root.contentFontFamily
+                    onClicked: root.deleteEvent(eventRow.modelData)
                   }
                 }
 
                 Row {
                   id: eventBody
                   anchors.left: parent.left
-                  anchors.right: eventRow.joinable ? joinButton.left : parent.right
-                  anchors.rightMargin: eventRow.joinable ? Style.space(3) : 0
+                  anchors.right: actionButtons.left
+                  anchors.rightMargin: Style.space(4)
                   anchors.verticalCenter: parent.verticalCenter
                   spacing: Style.space(4)
 
-                  // Deliberately here and not on the row: this stops at the
-                  // Join button's left edge, so the two hit areas cannot
-                  // overlap. Two TapHandlers over one point would both fire
-                  // and open two tabs.
                   TapHandler {
                     enabled: eventRow.openable
                     onTapped: root.openEvent(eventRow.modelData)
                   }
 
-                Rectangle {
-                  width: Style.space(2)
-                  height: eventLines.height
-                  radius: width / 2
-                  color: eventRow.declined
-                    ? Qt.darker(eventRow.modelData.color, 2.2)
-                    : eventRow.modelData.color
-                }
-
-                Text {
-                  width: Style.space(44)
-                  text: eventRow.modelData.allDay
-                    ? qsTr("All day")
-                    : Qt.formatDateTime(new Date(eventRow.modelData.start), "HH:mm")
-                  color: Qt.darker(root.contentForeground, eventRow.declined ? 2.2 : 1.5)
-                  font.family: root.contentFontFamily
-                  font.pixelSize: Style.font.bodySmall
-                  font.strikeout: eventRow.declined
-                }
-
-                Column {
-                  id: eventLines
-                  width: eventBody.width - Style.space(54)
-                  spacing: Style.space(1)
+                  Rectangle {
+                    width: Style.space(2)
+                    height: eventLines.height
+                    radius: width / 2
+                    color: eventRow.declined
+                      ? Qt.darker(eventRow.modelData.color, 2.2)
+                      : eventRow.modelData.color
+                  }
 
                   Text {
-                    width: parent.width
-                    text: eventRow.modelData.title
-                    color: eventRow.declined
-                      ? Qt.darker(root.contentForeground, 2.0)
-                      : root.contentForeground
+                    width: Style.space(44)
+                    text: eventRow.modelData.allDay
+                      ? (root.language === "en" ? "All-day" : "Todo el día")
+                      : Qt.formatDateTime(new Date(eventRow.modelData.start), "HH:mm")
+                    color: Qt.darker(root.contentForeground, eventRow.declined ? 2.2 : 1.5)
                     font.family: root.contentFontFamily
                     font.pixelSize: Style.font.bodySmall
                     font.strikeout: eventRow.declined
-                    elide: Text.ElideRight
                   }
 
-                  Text {
-                    width: parent.width
-                    visible: text !== ""
-                    text: {
-                      if (eventRow.declined) return qsTr("Declined")
-                      if (Model.isOutOfOffice(eventRow.modelData)) return qsTr("Out of office")
-                      return eventRow.modelData.location
+                  Column {
+                    id: eventLines
+                    width: eventBody.width - Style.space(54)
+                    spacing: Style.space(1)
+
+                    Text {
+                      width: parent.width
+                      text: eventRow.modelData.title
+                      color: eventRow.declined
+                        ? Qt.darker(root.contentForeground, 2.0)
+                        : root.contentForeground
+                      font.family: root.contentFontFamily
+                      font.pixelSize: Style.font.bodySmall
+                      font.strikeout: eventRow.declined
+                      elide: Text.ElideRight
                     }
-                    color: Qt.darker(root.contentForeground, 1.9)
-                    font.family: root.contentFontFamily
-                    font.pixelSize: Style.font.caption
-                    elide: Text.ElideRight
+
+                    Text {
+                      width: parent.width
+                      visible: text !== ""
+                      text: {
+                        if (eventRow.declined) return "Rechazado"
+                        if (Model.isOutOfOffice(eventRow.modelData)) return "Fuera de la oficina"
+                        return eventRow.modelData.location
+                      }
+                      color: Qt.darker(root.contentForeground, 1.9)
+                      font.family: root.contentFontFamily
+                      font.pixelSize: Style.font.caption
+                      elide: Text.ElideRight
+                    }
                   }
-                }
                 }
               }
             }
@@ -1209,15 +1524,29 @@ Panel {
                 enabled: root.syncState === "missing"
                 onTapped: root.copySetupCommand()
               }
-              text: root.syncState === "missing"
-                ? (root.setupCommandCopied
-                  ? qsTr("Copied. Paste it in a terminal:\n%1").arg(root.setupCommand)
-                  : qsTr("No calendar synced yet. Click to copy, then run:\n%1").arg(root.setupCommand))
-                : root.syncState === "version"
-                  ? qsTr("Events file was written by a newer version. Update the plugin.")
-                  : root.syncState === "stale"
-                    ? qsTr("Calendar may be out of date. Check journalctl --user -u omarchy-calendar-sync")
-                    : qsTr("Nothing scheduled")
+              text: {
+                if (root.syncState === "missing") {
+                  if (root.language === "en") {
+                    return root.setupCommandCopied
+                      ? "Copied. Paste it in a terminal:\n" + root.setupCommand
+                      : "No calendar synced yet. Click to copy then run:\n" + root.setupCommand
+                  }
+                  return root.setupCommandCopied
+                    ? "Copiado. Pégalo en una terminal:\n" + root.setupCommand
+                    : "No hay calendario sincronizado. Haz clic para copiar y luego ejecuta:\n" + root.setupCommand
+                }
+                if (root.syncState === "version") {
+                  return root.language === "en"
+                    ? "Events file was written by a newer version. Update the plugin."
+                    : "Archivo de eventos escrito por una versión más reciente. Actualiza el plugin."
+                }
+                if (root.syncState === "stale") {
+                  return root.language === "en"
+                    ? "Calendar may be out of date. Check journalctl --user -u omarchy-calendar-sync"
+                    : "El calendario podría estar desactualizado. Revisa journalctl --user -u omarchy-calendar-sync"
+                }
+                return root.language === "en" ? "No events scheduled" : "No hay eventos programados"
+              }
             }
 
           }
@@ -1232,6 +1561,11 @@ Panel {
 
             foreground: root.contentForeground
             fontFamily: root.contentFontFamily
+
+            language: root.language
+            weatherLocation: root.weatherLocation
+            onLanguagePicked: function(lang) { root.setLanguage(lang) }
+            onWeatherLocationPicked: function(loc) { root.setWeatherLocation(loc) }
 
             calendars: root.knownCalendars
             hiddenCalendars: root.hiddenCalendars
@@ -1248,7 +1582,7 @@ Panel {
             eventCount: root.eventDoc && root.eventDoc.events ? root.eventDoc.events.length : 0
             sourceLabel: root.eventDoc ? String(root.eventDoc.source || "") : ""
             syncedAt: root.eventDoc && root.eventDoc.syncedAt
-              ? Qt.formatDateTime(new Date(root.eventDoc.syncedAt), "d MMM HH:mm")
+              ? root.formatSyncedAt(new Date(root.eventDoc.syncedAt))
               : ""
 
             onCalendarToggled: function(calendarId) { root.toggleCalendar(calendarId) }
@@ -1257,6 +1591,359 @@ Panel {
             onHideDeclinedToggled: root.toggleHideDeclined()
             onWeekStartToggled: root.toggleWeekStart()
             onLeadMinutesPicked: function(minutes) { root.setAnnounceLeadMinutes(minutes) }
+          }
+        }
+      }
+    }
+
+    // ---- Event Add / Edit Modal Overlay ----
+    Rectangle {
+      visible: root.showingEventModal
+      anchors.fill: parent
+      color: Qt.rgba(0, 0, 0, 0.75)
+      radius: Style.cornerRadius
+      z: 100
+
+      MouseArea {
+        anchors.fill: parent
+        acceptedButtons: Qt.AllButtons
+      }
+
+      Rectangle {
+        width: Math.min(parent.width - Style.space(32), Style.space(380))
+        anchors.centerIn: parent
+        color: Color.popups.background
+        border.color: Color.popups.border
+        border.width: Style.space(1)
+        radius: Style.cornerRadius
+        implicitHeight: modalCol.implicitHeight + Style.space(24)
+        height: implicitHeight
+
+        Column {
+          id: modalCol
+          anchors.left: parent.left
+          anchors.right: parent.right
+          anchors.top: parent.top
+          anchors.margins: Style.space(14)
+          spacing: Style.space(10)
+
+          Row {
+            width: parent.width
+            Text {
+              text: root.isEditingEvent
+                ? (root.language === "en" ? "󰏫  EDIT EVENT" : "󰏫  EDITAR EVENTO")
+                : (root.language === "en" ? "󰐕  NEW EVENT" : "󰐕  NUEVO EVENTO")
+              color: root.contentForeground
+              font.family: root.contentFontFamily
+              font.pixelSize: Style.font.body
+              font.bold: true
+              anchors.verticalCenter: parent.verticalCenter
+            }
+          }
+
+          Text {
+            text: root.language === "en" ? "Event title:" : "Título del evento:"
+            color: Qt.darker(root.contentForeground, 1.4)
+            font.family: root.contentFontFamily
+            font.pixelSize: Style.font.caption
+          }
+
+          TextField {
+            id: modalTitleField
+            width: parent.width
+            placeholderText: root.language === "en" ? "e.g. Project meeting..." : "Ej. Reunión de proyecto..."
+            foreground: root.contentForeground
+            font.family: root.contentFontFamily
+            Keys.onPressed: function(event) {
+              if (event.key === Qt.Key_Return || event.key === Qt.Key_Enter) {
+                root.commitEventModal()
+                event.accepted = true
+              } else if (event.key === Qt.Key_Escape) {
+                root.closeEventModal()
+                event.accepted = true
+              }
+            }
+          }
+
+          Row {
+            width: parent.width
+            spacing: Style.space(10)
+
+            Column {
+              width: (parent.width - Style.space(10)) / 2
+              spacing: Style.space(4)
+
+              Text {
+                text: root.language === "en" ? "Date:" : "Fecha:"
+                color: Qt.darker(root.contentForeground, 1.4)
+                font.family: root.contentFontFamily
+                font.pixelSize: Style.font.caption
+              }
+
+              Text {
+                text: root.modalDate
+                color: Color.accent
+                font.family: root.contentFontFamily
+                font.pixelSize: Style.font.bodySmall
+                font.bold: true
+              }
+            }
+
+            Column {
+              width: (parent.width - Style.space(10)) / 2
+              spacing: Style.space(4)
+
+              Row {
+                spacing: Style.space(6)
+
+                Rectangle {
+                  width: Style.space(16)
+                  height: Style.space(16)
+                  radius: Style.space(3)
+                  color: root.modalAllDay ? Color.accent : "transparent"
+                  border.width: Style.spacing.hairline
+                  border.color: root.modalAllDay ? Color.accent : Qt.darker(root.contentForeground, 1.5)
+                  anchors.verticalCenter: parent.verticalCenter
+
+                  Text {
+                    visible: root.modalAllDay
+                    anchors.centerIn: parent
+                    text: "✓"
+                    color: Color.background
+                    font.pixelSize: Style.font.caption
+                    font.bold: true
+                  }
+
+                  MouseArea {
+                    anchors.fill: parent
+                    cursorShape: Qt.PointingHandCursor
+                    onClicked: root.modalAllDay = !root.modalAllDay
+                  }
+                }
+
+                Text {
+                  text: root.language === "en" ? "All-day" : "Todo el día"
+                  color: root.contentForeground
+                  font.family: root.contentFontFamily
+                  font.pixelSize: Style.font.caption
+                  anchors.verticalCenter: parent.verticalCenter
+                }
+              }
+            }
+          }
+
+          Row {
+            visible: !root.modalAllDay
+            width: parent.width
+            spacing: Style.space(10)
+
+            Column {
+              width: (parent.width - Style.space(10)) / 2
+              spacing: Style.space(4)
+
+              Text {
+                text: root.language === "en" ? "Start (HH:MM):" : "Inicio (HH:MM):"
+                color: Qt.darker(root.contentForeground, 1.4)
+                font.family: root.contentFontFamily
+                font.pixelSize: Style.font.caption
+              }
+
+              TextField {
+                id: modalStartTimeField
+                width: parent.width
+                placeholderText: "10:00"
+                foreground: root.contentForeground
+                font.family: root.contentFontFamily
+                Keys.onPressed: function(event) {
+                  if (event.key === Qt.Key_Return || event.key === Qt.Key_Enter) {
+                    root.commitEventModal()
+                    event.accepted = true
+                  } else if (event.key === Qt.Key_Escape) {
+                    root.closeEventModal()
+                    event.accepted = true
+                  }
+                }
+              }
+            }
+
+            Column {
+              width: (parent.width - Style.space(10)) / 2
+              spacing: Style.space(4)
+
+              Text {
+                text: root.language === "en" ? "End (HH:MM):" : "Fin (HH:MM):"
+                color: Qt.darker(root.contentForeground, 1.4)
+                font.family: root.contentFontFamily
+                font.pixelSize: Style.font.caption
+              }
+
+              TextField {
+                id: modalEndTimeField
+                width: parent.width
+                placeholderText: "11:00"
+                foreground: root.contentForeground
+                font.family: root.contentFontFamily
+                Keys.onPressed: function(event) {
+                  if (event.key === Qt.Key_Return || event.key === Qt.Key_Enter) {
+                    root.commitEventModal()
+                    event.accepted = true
+                  } else if (event.key === Qt.Key_Escape) {
+                    root.closeEventModal()
+                    event.accepted = true
+                  }
+                }
+              }
+            }
+          }
+
+          Text {
+            text: root.language === "en" ? "Location (optional):" : "Ubicación (opcional):"
+            color: Qt.darker(root.contentForeground, 1.4)
+            font.family: root.contentFontFamily
+            font.pixelSize: Style.font.caption
+          }
+
+          TextField {
+            id: modalLocationField
+            width: parent.width
+            placeholderText: root.language === "en" ? "e.g. Google Meet, Office..." : "Ej. Google Meet, Oficina..."
+            foreground: root.contentForeground
+            font.family: root.contentFontFamily
+            Keys.onPressed: function(event) {
+              if (event.key === Qt.Key_Return || event.key === Qt.Key_Enter) {
+                root.commitEventModal()
+                event.accepted = true
+              } else if (event.key === Qt.Key_Escape) {
+                root.closeEventModal()
+                event.accepted = true
+              }
+            }
+          }
+
+          Text {
+            text: root.language === "en" ? "Event color:" : "Color del evento:"
+            color: Qt.darker(root.contentForeground, 1.4)
+            font.family: root.contentFontFamily
+            font.pixelSize: Style.font.caption
+          }
+
+          Row {
+            spacing: Style.space(6)
+            width: parent.width
+
+            Repeater {
+              model: [
+                { id: "", color: Color.accent, name_es: "Predeterminado", name_en: "Default" },
+                { id: "1", color: "#a4bdfc", name_es: "Lavanda", name_en: "Lavender" },
+                { id: "2", color: "#7ae7bf", name_es: "Salvia", name_en: "Sage" },
+                { id: "3", color: "#dbadff", name_es: "Uva", name_en: "Grape" },
+                { id: "4", color: "#ff887c", name_es: "Flamenco", name_en: "Flamingo" },
+                { id: "5", color: "#fbd75b", name_es: "Plátano", name_en: "Banana" },
+                { id: "6", color: "#ffb878", name_es: "Mandarina", name_en: "Tangerine" },
+                { id: "7", color: "#46d6db", name_es: "Pavo real", name_en: "Peacock" },
+                { id: "8", color: "#e1e1e1", name_es: "Grafito", name_en: "Graphite" },
+                { id: "9", color: "#5484ed", name_es: "Arándano", name_en: "Blueberry" },
+                { id: "10", color: "#51b749", name_es: "Albahaca", name_en: "Basil" },
+                { id: "11", color: "#dc2127", name_es: "Tomate", name_en: "Tomato" }
+              ]
+
+              Rectangle {
+                id: colorCircle
+                required property var modelData
+                width: Style.space(20)
+                height: Style.space(20)
+                radius: width / 2
+                color: modelData.color
+                border.width: root.modalColorId === modelData.id ? Style.space(2) : Style.spacing.hairline
+                border.color: root.modalColorId === modelData.id ? Color.foreground : Qt.darker(root.contentForeground, 1.8)
+
+                Text {
+                  visible: root.modalColorId === colorCircle.modelData.id
+                  anchors.centerIn: parent
+                  text: "✓"
+                  color: "#1d1d1d"
+                  font.pixelSize: Style.font.caption - 2
+                  font.bold: true
+                }
+
+                MouseArea {
+                  id: colorMouse
+                  anchors.fill: parent
+                  hoverEnabled: true
+                  cursorShape: Qt.PointingHandCursor
+                  onClicked: root.modalColorId = colorCircle.modelData.id
+                }
+
+                PanelToolTip {
+                  visible: colorMouse.containsMouse
+                  text: root.language === "en" ? colorCircle.modelData.name_en : colorCircle.modelData.name_es
+                  fontFamily: root.contentFontFamily
+                }
+              }
+            }
+          }
+
+          Item { height: Style.space(4); width: 1 }
+
+          Row {
+            anchors.right: parent.right
+            spacing: Style.space(8)
+
+            Rectangle {
+              width: cancelBtnText.implicitWidth + Style.space(20)
+              height: Style.space(30)
+              radius: Style.cornerRadius
+              color: cancelBtnMouse.containsMouse
+                ? Style.hoverFillFor(root.contentForeground, Color.accent)
+                : Qt.rgba(root.contentForeground.r, root.contentForeground.g, root.contentForeground.b, 0.1)
+
+              Text {
+                id: cancelBtnText
+                anchors.centerIn: parent
+                text: root.language === "en" ? "Cancel" : "Cancelar"
+                color: Qt.darker(root.contentForeground, 1.2)
+                font.family: root.contentFontFamily
+                font.pixelSize: Style.font.bodySmall
+                font.bold: true
+              }
+
+              MouseArea {
+                id: cancelBtnMouse
+                anchors.fill: parent
+                hoverEnabled: true
+                cursorShape: Qt.PointingHandCursor
+                onClicked: root.closeEventModal()
+              }
+            }
+
+            Rectangle {
+              width: saveBtnText.implicitWidth + Style.space(20)
+              height: Style.space(30)
+              radius: Style.cornerRadius
+              color: saveBtnMouse.containsMouse
+                ? Qt.darker(Color.accent, 1.2)
+                : Color.accent
+
+              Text {
+                id: saveBtnText
+                anchors.centerIn: parent
+                text: root.isEditingEvent
+                  ? (root.language === "en" ? "Update" : "Actualizar")
+                  : (root.language === "en" ? "Save" : "Guardar")
+                color: Color.background
+                font.family: root.contentFontFamily
+                font.pixelSize: Style.font.bodySmall
+                font.bold: true
+              }
+
+              MouseArea {
+                id: saveBtnMouse
+                anchors.fill: parent
+                hoverEnabled: true
+                cursorShape: Qt.PointingHandCursor
+                onClicked: root.commitEventModal()
+              }
+            }
           }
         }
       }

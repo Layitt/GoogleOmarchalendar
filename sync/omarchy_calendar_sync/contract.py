@@ -33,6 +33,7 @@ OPTIONAL_EVENT_FIELDS = (
     "eventUrl",
     "eventType",
     "responseStatus",
+    "colorId",
 )
 
 _DATE_KEY = re.compile(r"^\d{4}-\d{2}-\d{2}$")

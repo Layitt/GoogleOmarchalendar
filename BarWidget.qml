@@ -80,7 +80,30 @@ BarWidget {
   }
 
   function formatted(date) {
-    return Qt.formatDateTime(date, activeFormat.replace(/ww/g, Model.isoWeekLiteral(date.getFullYear(), date.getMonth(), date.getDate())))
+    var fmt = activeFormat.replace(/ww/g, Model.isoWeekLiteral(date.getFullYear(), date.getMonth(), date.getDate()));
+    var out = Qt.formatDateTime(date, fmt);
+    var lang = setting("language", "es");
+    if (lang === "en") return out;
+
+    var days = ["Domingo", "Lunes", "Martes", "Miércoles", "Jueves", "Viernes", "Sábado"];
+    var daysShort = ["Dom", "Lun", "Mar", "Mié", "Jue", "Vie", "Sáb"];
+    var months = ["enero", "febrero", "marzo", "abril", "mayo", "junio", "julio", "agosto", "septiembre", "octubre", "noviembre", "diciembre"];
+    var monthsShort = ["ene", "feb", "mar", "abr", "may", "jun", "jul", "ago", "sep", "oct", "nov", "dic"];
+
+    var enDays = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
+    var enDaysShort = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+    var enMonths = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
+    var enMonthsShort = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+
+    for (var i = 0; i < 7; i++) {
+      out = out.replace(new RegExp("\\b" + enDays[i] + "\\b", "g"), days[i]);
+      out = out.replace(new RegExp("\\b" + enDaysShort[i] + "\\b", "g"), daysShort[i]);
+    }
+    for (var j = 0; j < 12; j++) {
+      out = out.replace(new RegExp("\\b" + enMonths[j] + "\\b", "gi"), months[j]);
+      out = out.replace(new RegExp("\\b" + enMonthsShort[j] + "\\b", "gi"), monthsShort[j]);
+    }
+    return out;
   }
 
   // ---- Calendar popup. Shape contract for shell.summon/hide/toggle

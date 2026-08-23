@@ -1,11 +1,11 @@
 {
   "schemaVersion": 1,
   "id": "tmn73.calendar",
-  "name": "Calendar",
-  "version": "0.2.1",
-  "author": "tmn73",
+  "name": "Google Omarchalendar",
+  "version": "1.0.0",
+  "author": "Layitt",
   "license": "MIT",
-  "description": "Your Google Calendar in the bar. Your next meeting at a glance, and one click to join it.",
+  "description": "Google Calendar widget with interactive event management, official color picker, hyper-local weather forecast, and bilingual Spanish/English localization.",
   "kinds": [
     "bar-widget"
   ],
@@ -13,8 +13,8 @@
     "barWidget": "BarWidget.qml"
   },
   "barWidget": {
-    "displayName": "Calendar",
-    "description": "Your Google Calendar in the bar. Your next meeting at a glance, and one click to join it.",
+    "displayName": "Calendario & Clima",
+    "description": "Tu calendario de Google en la barra con gestión de eventos (añadir, editar, borrar), selección de colores oficiales, pronóstico del clima y soporte completo en español.",
     "category": "Time",
     "allowMultiple": false,
     "defaults": {
@@ -52,6 +52,18 @@
         "type": "number",
         "label": "Life expectancy",
         "defaultValue": 0
+      },
+      {
+        "key": "language",
+        "type": "string",
+        "label": "Language / Idioma (es/en)",
+        "defaultValue": "es"
+      },
+      {
+        "key": "weatherLocation",
+        "type": "string",
+        "label": "Weather location",
+        "defaultValue": ""
       }
     ]
   }

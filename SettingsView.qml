@@ -14,6 +14,9 @@ Column {
   property color foreground: "white"
   property string fontFamily: ""
 
+  property string language: "es"
+  property string weatherLocation: ""
+
   property var calendars: []
   property var hiddenCalendars: []
   property bool showYearProgress: false
@@ -29,6 +32,8 @@ Column {
   property string setupCommand: ""
   property bool setupCommandCopied: false
 
+  signal languagePicked(string lang)
+  signal weatherLocationPicked(string location)
   signal calendarToggled(string calendarId)
   signal yearProgressToggled()
   signal weekStartToggled()
@@ -128,14 +133,96 @@ Column {
     }
   }
 
-  // ---- Calendars
+  // ---- Language / Idioma ----
 
-  SectionTitle { text: qsTr("CALENDARS") }
+  SectionTitle { text: root.language === "en" ? "LANGUAGE" : "IDIOMA" }
+
+  Row {
+    spacing: Style.space(6)
+
+    Rectangle {
+      readonly property bool active: root.language === "es"
+      width: esLabel.implicitWidth + Style.space(20)
+      height: Style.space(26)
+      radius: height / 2
+      color: active
+        ? Qt.rgba(root.foreground.r, root.foreground.g, root.foreground.b, 0.14)
+        : "transparent"
+      border.width: Style.spacing.hairline
+      border.color: active ? root.muted : Qt.darker(root.foreground, 2.4)
+
+      Text {
+        id: esLabel
+        anchors.centerIn: parent
+        text: "Español"
+        color: parent.active ? root.foreground : root.faint
+        font.family: root.fontFamily
+        font.pixelSize: Style.font.caption
+        font.bold: parent.active
+      }
+
+      TapHandler { onTapped: root.languagePicked("es") }
+    }
+
+    Rectangle {
+      readonly property bool active: root.language === "en"
+      width: enLabel.implicitWidth + Style.space(20)
+      height: Style.space(26)
+      radius: height / 2
+      color: active
+        ? Qt.rgba(root.foreground.r, root.foreground.g, root.foreground.b, 0.14)
+        : "transparent"
+      border.width: Style.spacing.hairline
+      border.color: active ? root.muted : Qt.darker(root.foreground, 2.4)
+
+      Text {
+        id: enLabel
+        anchors.centerIn: parent
+        text: "English"
+        color: parent.active ? root.foreground : root.faint
+        font.family: root.fontFamily
+        font.pixelSize: Style.font.caption
+        font.bold: parent.active
+      }
+
+      TapHandler { onTapped: root.languagePicked("en") }
+    }
+  }
+
+  // ---- Weather Location / Ubicación del Clima ----
+
+  SectionTitle { text: root.language === "en" ? "WEATHER LOCATION" : "UBICACIÓN DEL CLIMA" }
+
+  Text {
+    width: parent.width
+    text: root.language === "en"
+      ? "Enter city name (e.g. Morelia, Madrid, Tokyo) or 'Auto':"
+      : "Escribe una ciudad (ej. Morelia, Madrid, Tokio) o 'Auto':"
+    color: root.faint
+    font.family: root.fontFamily
+    font.pixelSize: Style.font.caption
+    wrapMode: Text.WordWrap
+  }
+
+  TextField {
+    id: weatherInput
+    width: parent.width
+    text: root.weatherLocation || ""
+    placeholderText: "Auto (IP detection)"
+    foreground: root.foreground
+    font.family: root.fontFamily
+    onAccepted: root.weatherLocationPicked(text)
+    onEditingFinished: root.weatherLocationPicked(text)
+  }
+
+  // ---- Calendars ----
+
+  SectionTitle { text: root.language === "en" ? "CALENDARS" : "CALENDARIOS" }
 
   Text {
     width: parent.width
     visible: root.calendars.length === 0
-    text: qsTr("Nothing synced yet, so there is nothing to choose from.")
+    text: root.language === "en" ? "No calendars synced." : "No hay calendarios sincronizados."
     color: root.faint
     font.family: root.fontFamily
     font.pixelSize: Style.font.caption
@@ -155,47 +242,47 @@ Column {
     }
   }
 
-  // ---- Display
+  // ---- Display ----
 
-  SectionTitle { text: qsTr("DISPLAY") }
+  SectionTitle { text: root.language === "en" ? "DISPLAY" : "VISUALIZACIÓN" }
 
   ToggleRow {
-    label: qsTr("Week starts on Monday")
-    hint: qsTr("Off starts the week on Sunday")
+    label: root.language === "en" ? "Start weeks on Monday" : "Iniciar semanas en lunes"
+    hint: root.language === "en" ? "Disabled starts the week on Sunday" : "Desactivado inicia la semana en domingo"
     checked: root.weekStartsMonday
     onActivated: root.weekStartToggled()
   }
 
   ToggleRow {
-    label: qsTr("Working location events")
-    hint: qsTr("Google's work-from-home markers, hidden by default")
+    label: root.language === "en" ? "Working-location events" : "Eventos de ubicación de trabajo"
+    hint: root.language === "en" ? "Google's remote markers, hidden by default" : "Marcadores de trabajo remoto de Google, ocultos por defecto"
     checked: root.showWorkingLocation
     onActivated: root.workingLocationToggled()
   }
 
   ToggleRow {
-    // Every row on this page reads "checked means shown". Phrasing this one as
-    // "Hide ..." inverted that and made the page contradict itself.
-    label: qsTr("Declined invitations")
-    hint: qsTr("Shown struck through when on")
+    label: root.language === "en" ? "Declined invitations" : "Invitaciones rechazadas"
+    hint: root.language === "en" ? "Struck through when enabled" : "Se muestran tachadas al estar activado"
     checked: !root.hideDeclined
     onActivated: root.hideDeclinedToggled()
   }
 
   ToggleRow {
-    label: qsTr("Year and life progress")
-    hint: qsTr("The upstream clock's bars, off by default")
+    label: root.language === "en" ? "Year and life progress" : "Progreso de año y vida"
+    hint: root.language === "en" ? "Time-meter bars, disabled by default" : "Barras de progreso de tiempo, desactivadas por defecto"
     checked: root.showYearProgress
     onActivated: root.yearProgressToggled()
   }
 
-  // ---- Bar
+  // ---- Bar ----
 
-  SectionTitle { text: qsTr("BAR LABEL") }
+  SectionTitle { text: root.language === "en" ? "BAR LABEL" : "ETIQUETA DE LA BARRA" }
 
   Text {
     width: parent.width
-    text: qsTr("How early the bar gives up the clock to announce what is next.")
+    text: root.language === "en"
+      ? "How far ahead the bar announces the next event."
+      : "Con cuánta antelación la barra anuncia el siguiente evento."
     color: root.faint
     font.family: root.fontFamily
     font.pixelSize: Style.font.caption
@@ -225,7 +312,7 @@ Column {
         Text {
           id: leadLabel
           anchors.centerIn: parent
-          text: modelData === 0 ? qsTr("Never") : modelData + qsTr("min")
+          text: modelData === 0 ? (root.language === "en" ? "Never" : "Nunca") : (modelData + " min")
           color: active ? root.foreground : root.faint
           font.family: root.fontFamily
           font.pixelSize: Style.font.caption
@@ -236,11 +323,9 @@ Column {
     }
   }
 
-  // ---- Sync status. Read-only on purpose: changing the Google account is an
-  //      OAuth browser flow, which belongs to sync/setup and not to a popup
-  //      in a status bar. What belongs here is knowing whether it is working.
+  // ---- Sync status ----
 
-  SectionTitle { text: qsTr("SYNC") }
+  SectionTitle { text: root.language === "en" ? "SYNC" : "SINCRONIZACIÓN" }
 
   Text {
     width: parent.width
@@ -262,17 +347,32 @@ Column {
 
     text: {
       if (root.syncState === "missing") {
+        if (root.language === "en") {
+          return root.setupCommandCopied
+            ? "Copied. Paste it in a terminal:\n" + root.setupCommand
+            : "No calendar connected. Click to copy then run:\n" + root.setupCommand
+        }
         return root.setupCommandCopied
-          ? qsTr("Copied. Paste it in a terminal:\n%1").arg(root.setupCommand)
-          : qsTr("No calendar connected yet. Click to copy, then run:\n%1").arg(root.setupCommand)
+          ? "Copiado. Pégalo en una terminal:\n" + root.setupCommand
+          : "No hay calendario conectado. Clic para copiar y luego ejecutar:\n" + root.setupCommand
       }
-      if (root.syncState === "version") return qsTr("The events file was written by a newer version of this plugin.")
+      if (root.syncState === "version") {
+        return root.language === "en"
+          ? "The events file was written by a newer version."
+          : "El archivo de eventos fue escrito por una versión más reciente."
+      }
 
-      var line = root.eventCount + qsTr(" events from ") + root.sourceLabel
+      var line = root.language === "en"
+        ? (root.eventCount + " events from " + root.sourceLabel)
+        : (root.eventCount + " eventos de " + root.sourceLabel)
       if (root.syncState === "stale") {
-        return line + qsTr("\nLast sync looks old. Check: journalctl --user -u omarchy-calendar-sync")
+        return root.language === "en"
+          ? (line + "\nLast sync looks old. Check: journalctl --user -u omarchy-calendar-sync")
+          : (line + "\nLa última sincronización parece antigua. Revisa: journalctl --user -u omarchy-calendar-sync")
       }
-      return line + qsTr("\nLast sync ") + root.syncedAt
+      return root.language === "en"
+        ? (line + "\nLast synced " + root.syncedAt)
+        : (line + "\nÚltima sincronización " + root.syncedAt)
     }
   }
 }

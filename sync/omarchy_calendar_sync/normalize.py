@@ -62,6 +62,26 @@ def normalize_all(gevents, calendar, tz):
     return rows
 
 
+EVENT_COLORS = {
+    "1": "#a4bdfc",
+    "2": "#7ae7bf",
+    "3": "#dbadff",
+    "4": "#ff887c",
+    "5": "#fbd75b",
+    "6": "#ffb878",
+    "7": "#46d6db",
+    "8": "#e1e1e1",
+    "9": "#5484ed",
+    "10": "#51b749",
+    "11": "#dc2127",
+}
+
+
+def _event_color(gevent, calendar_color):
+    cid = str(gevent.get("colorId") or "")
+    return EVENT_COLORS.get(cid, calendar_color)
+
+
 def normalize_event(gevent, calendar, tz):
     """Return one contract row per local day this event covers.
 
@@ -100,13 +120,16 @@ def normalize_event(gevent, calendar, tz):
     event_url = _https_only(gevent.get("htmlLink"))
     event_type = str(gevent.get("eventType") or "")
     response_status = _response_status(gevent)
+    color_id = str(gevent.get("colorId") or "")
+    color = _event_color(gevent, calendar["color"])
 
     return [
         {
             "id": gevent.get("id", ""),
             "calendarId": calendar["id"],
             "calendarName": calendar["name"],
-            "color": calendar["color"],
+            "color": color,
+            "colorId": color_id,
             "dateKey": day.isoformat(),
             "start": start_iso,
             "end": end_iso,
