@@ -9,6 +9,7 @@
 
 **Tu Google Calendar interactivo y pronóstico del clima directamente en la barra de Omarchy.**  
 *An interactive Google Calendar widget with full event management, color coding, and hyper-local weather for Omarchy Desktop.*
+This is a fork of this plugin https://github.com/tmn73/omarchy-calendar.git
 
 [✨ Características](#-características--features) • [🚀 Instalación](#-instalación--installation) • [⚙️ Configuración](#️-configuración--settings) • [🌤️ Clima](#️-pronóstico-del-clima--weather-forecast) • [🔒 Privacidad](#-privacidad-y-seguridad--privacy--security)
 
