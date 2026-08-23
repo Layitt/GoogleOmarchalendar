@@ -2,7 +2,7 @@
 """Fetch weather forecast from Open-Meteo API.
 
 Supports dynamic geocoding for any city, auto-detection, and multi-language (ES/EN).
-Writes clean JSON to ~/.local/state/omarchy/calendar-weather.json.
+Writes clean, bounded JSON to ~/.local/state/omarchy/calendar-weather.json.
 """
 
 import argparse
@@ -16,6 +16,10 @@ from datetime import datetime
 STATE_DIR = os.path.expanduser("~/.local/state/omarchy")
 OUTPUT_FILE = os.path.join(STATE_DIR, "calendar-weather.json")
 LEGACY_OUTPUT_FILE = os.path.join(STATE_DIR, "weather-morelia.json")
+
+# Resource-bounding limits to prevent memory exhaustion
+MAX_HTTP_BYTES = 512 * 1024       # 512 KB maximum HTTP payload
+MAX_STATE_FILE_BYTES = 512 * 1024  # 512 KB maximum written state file
 
 WMO_MAP_ES = {
     0: ("Despejado", "󰖙"),
@@ -65,10 +69,10 @@ WMO_MAP_EN = {
     65: ("Heavy rain", "󰖖"),
     66: ("Freezing rain", "󰖖"),
     67: ("Heavy freezing rain", "󰖖"),
-    71: ("Slight snow", "󰖘"),
-    73: ("Moderate snow", "󰖘"),
-    75: ("Heavy snow", "󰖘"),
-    77: ("Snow grains", "󰖘"),
+    68: ("Slight snow", "󰖘"),
+    69: ("Moderate snow", "󰖘"),
+    70: ("Heavy snow", "󰖘"),
+    71: ("Snow grains", "󰖘"),
     80: ("Slight rain showers", "󰖖"),
     81: ("Moderate rain showers", "󰖖"),
     82: ("Violent rain showers", "󰖖"),
@@ -79,22 +83,37 @@ WMO_MAP_EN = {
     99: ("Thunderstorm with heavy hail", "󰙾")
 }
 
+def read_bounded_http_json(url, timeout=5, max_bytes=MAX_HTTP_BYTES):
+    """Fetch HTTP endpoint enforcing a strict maximum byte boundary."""
+    req = urllib.request.Request(url, headers={"User-Agent": "OmarchyCalendar/1.0"})
+    with urllib.request.urlopen(req, timeout=timeout) as resp:
+        content_len = resp.headers.get("Content-Length")
+        if content_len:
+            try:
+                if int(content_len) > max_bytes:
+                    raise ValueError(f"HTTP Content-Length {content_len} exceeds limit of {max_bytes} bytes")
+            except ValueError as ex:
+                if "exceeds limit" in str(ex):
+                    raise
+        chunk = resp.read(max_bytes + 1)
+        if len(chunk) > max_bytes:
+            raise ValueError(f"HTTP response body exceeded byte boundary of {max_bytes} bytes")
+        return json.loads(chunk.decode("utf-8"))
+
 def geocode_city(query, lang="es"):
     if not query or query.lower() in ("auto", "detect", ""):
         return None
     try:
         url = f"https://geocoding-api.open-meteo.com/v1/search?name={urllib.parse.quote(query.strip())}&count=1&language={lang}&format=json"
-        req = urllib.request.Request(url, headers={"User-Agent": "OmarchyCalendar/1.0"})
-        with urllib.request.urlopen(req, timeout=5) as resp:
-            data = json.loads(resp.read().decode("utf-8"))
-            results = data.get("results", [])
-            if results:
-                r = results[0]
-                name = r.get("name", query)
-                admin = r.get("admin1", "")
-                country = r.get("country", "")
-                display = f"{name}, {admin}" if admin else (f"{name}, {country}" if country else name)
-                return float(r["latitude"]), float(r["longitude"]), display, r.get("timezone", "auto")
+        data = read_bounded_http_json(url, timeout=5)
+        results = data.get("results", [])
+        if results:
+            r = results[0]
+            name = r.get("name", query)
+            admin = r.get("admin1", "")
+            country = r.get("country", "")
+            display = f"{name}, {admin}" if admin else (f"{name}, {country}" if country else name)
+            return float(r["latitude"]), float(r["longitude"]), display, r.get("timezone", "auto")
     except Exception as e:
         print(f"Geocoding error: {e}", file=sys.stderr)
     return None
@@ -110,24 +129,23 @@ def detect_location(custom_query=None, lang="es"):
     cfg = os.path.expanduser("~/.config/omarchy/weather.json")
     if os.path.exists(cfg):
         try:
-            with open(cfg, "r", encoding="utf-8") as f:
-                d = json.load(f)
-                if d.get("latitude") and d.get("longitude"):
-                    return float(d["latitude"]), float(d["longitude"]), d.get("name", "Local"), "auto"
+            if os.path.getsize(cfg) <= MAX_STATE_FILE_BYTES:
+                with open(cfg, "r", encoding="utf-8") as f:
+                    d = json.load(f)
+                    if d.get("latitude") and d.get("longitude"):
+                        return float(d["latitude"]), float(d["longitude"]), d.get("name", "Local"), "auto"
         except Exception:
             pass
 
     # 3. Try IP auto-detection
     try:
-        req = urllib.request.Request("https://ipapi.co/json/", headers={"User-Agent": "OmarchyCalendar/1.0"})
-        with urllib.request.urlopen(req, timeout=3) as resp:
-            data = json.loads(resp.read().decode("utf-8"))
-            if data.get("latitude") and data.get("longitude"):
-                city = data.get("city", "")
-                region = data.get("region", "")
-                name = f"{city}, {region}" if region else city
-                tz = data.get("timezone", "auto")
-                return float(data["latitude"]), float(data["longitude"]), name, tz
+        data = read_bounded_http_json("https://ipapi.co/json/", timeout=3)
+        if data.get("latitude") and data.get("longitude"):
+            city = data.get("city", "")
+            region = data.get("region", "")
+            name = f"{city}, {region}" if region else city
+            tz = data.get("timezone", "auto")
+            return float(data["latitude"]), float(data["longitude"]), name, tz
     except Exception:
         pass
 
@@ -145,9 +163,7 @@ def fetch_weather(location_query=None, lang="es"):
     )
 
     try:
-        req = urllib.request.Request(url, headers={"User-Agent": "OmarchyCalendar/1.0"})
-        with urllib.request.urlopen(req, timeout=10) as resp:
-            data = json.loads(resp.read().decode("utf-8"))
+        data = read_bounded_http_json(url, timeout=10)
     except Exception as e:
         print(f"Error fetching weather: {e}", file=sys.stderr)
         return False
@@ -211,20 +227,25 @@ def fetch_weather(location_query=None, lang="es"):
         }
 
     output = {
-        "city": location_name,
+        "city": str(location_name)[:100],
         "updatedAt": datetime.now().isoformat(),
         "forecast": forecast
     }
 
+    serialized = json.dumps(output, indent=2, ensure_ascii=False)
+    if len(serialized.encode("utf-8")) > MAX_STATE_FILE_BYTES:
+        print("Generated weather payload exceeds maximum allowed size", file=sys.stderr)
+        return False
+
     os.makedirs(STATE_DIR, exist_ok=True)
     temp_file = OUTPUT_FILE + ".tmp"
     with open(temp_file, "w", encoding="utf-8") as f:
-        json.dump(output, f, indent=2, ensure_ascii=False)
+        f.write(serialized)
     os.replace(temp_file, OUTPUT_FILE)
 
     try:
         with open(LEGACY_OUTPUT_FILE, "w", encoding="utf-8") as f:
-            json.dump(output, f, indent=2, ensure_ascii=False)
+            f.write(serialized)
     except Exception:
         pass
     return True

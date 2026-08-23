@@ -36,9 +36,33 @@ class GwsApiError(GwsError):
     """Google returned an error, or gws returned something unparseable."""
 
 
-def _subprocess_runner(argv, env):
-    completed = subprocess.run(argv, env=env, capture_output=True, text=True)
-    return completed.returncode, completed.stdout, completed.stderr
+MAX_SUBPROCESS_BYTES = 5 * 1024 * 1024  # 5 MB maximum output per gws call
+
+
+def _subprocess_runner(argv, env, max_bytes=MAX_SUBPROCESS_BYTES):
+    proc = subprocess.Popen(
+        argv,
+        env=env,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+    )
+    try:
+        raw_stdout, raw_stderr = proc.communicate(timeout=60)
+    except subprocess.TimeoutExpired:
+        proc.kill()
+        proc.communicate()
+        return 1, "", "gws subprocess timed out after 60s"
+
+    if len(raw_stdout) > max_bytes:
+        return 1, "", f"gws output exceeded maximum limit of {max_bytes} bytes"
+    if len(raw_stderr) > max_bytes:
+        return 1, "", f"gws stderr exceeded maximum limit of {max_bytes} bytes"
+
+    return (
+        proc.returncode,
+        raw_stdout.decode("utf-8", errors="replace"),
+        raw_stderr.decode("utf-8", errors="replace"),
+    )
 
 
 class Gws:

@@ -18,16 +18,24 @@ EXIT_SYNC_FAILED = 1
 EXIT_BAD_CONFIG = 2
 
 
+MAX_STATE_FILE_BYTES = 2 * 1024 * 1024  # 2 MB maximum state file size
+
+
 def write_atomic(path, doc):
-    """Write JSON so a reader never observes a partial file."""
+    """Write JSON so a reader never observes a partial or oversized file."""
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
 
+    serialized = json.dumps(doc, ensure_ascii=False, indent=2) + "\n"
+    if len(serialized.encode("utf-8")) > MAX_STATE_FILE_BYTES:
+        raise ValueError(
+            f"refusing to write document exceeding state file limit of {MAX_STATE_FILE_BYTES} bytes"
+        )
+
     handle, temp_name = tempfile.mkstemp(dir=str(path.parent), suffix=".tmp")
     try:
-        with os.fdopen(handle, "w") as stream:
-            json.dump(doc, stream, ensure_ascii=False, indent=2)
-            stream.write("\n")
+        with os.fdopen(handle, "w", encoding="utf-8") as stream:
+            stream.write(serialized)
             stream.flush()
             os.fsync(stream.fileno())
         os.replace(temp_name, path)

@@ -55,6 +55,9 @@ def build_document(events, synced_at, source):
     }
 
 
+MAX_EVENTS_COUNT = 3000
+
+
 def validate(doc):
     """Return a list of human readable problems. An empty list means valid."""
     problems = []
@@ -74,6 +77,12 @@ def validate(doc):
     events = doc.get("events")
     if not isinstance(events, list):
         problems.append("events must be a list")
+        return problems
+
+    if len(events) > MAX_EVENTS_COUNT:
+        problems.append(
+            f"events list has {len(events)} items, exceeding maximum allowed {MAX_EVENTS_COUNT}"
+        )
         return problems
 
     for index, event in enumerate(events):

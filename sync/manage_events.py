@@ -14,27 +14,56 @@ PLUGIN_DIR = SYNC_DIR.parent
 CONFIG_PATH = Path.home() / ".config" / "omarchy" / "calendar-sync.json"
 STATE_FILE = Path.home() / ".local" / "state" / "omarchy" / "calendar-events.json"
 
+# Resource-bounding limits
+MAX_SUBPROCESS_BYTES = 2 * 1024 * 1024  # 2 MB maximum output from gws CLI
+
 def get_gws_info():
     if CONFIG_PATH.exists():
         try:
-            with open(CONFIG_PATH, "r") as f:
+            with open(CONFIG_PATH, "r", encoding="utf-8") as f:
                 data = json.load(f)
                 return data.get("gwsPath", "gws"), data.get("profile", os.path.expanduser("~/.config/gws-omarchy-calendar"))
         except Exception:
             pass
     return "gws", os.path.expanduser("~/.config/gws-omarchy-calendar")
 
-def run_gws_cmd(args):
+def run_gws_cmd(args, max_bytes=MAX_SUBPROCESS_BYTES):
     gws_bin, profile = get_gws_info()
     env = dict(os.environ)
     env["GOOGLE_WORKSPACE_CLI_CONFIG_DIR"] = str(profile)
-    res = subprocess.run([gws_bin] + args, env=env, capture_output=True, text=True)
-    return res.returncode, res.stdout, res.stderr
+    
+    try:
+        proc = subprocess.Popen(
+            [gws_bin] + args,
+            env=env,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE
+        )
+        try:
+            raw_stdout, raw_stderr = proc.communicate(timeout=30)
+        except subprocess.TimeoutExpired:
+            proc.kill()
+            proc.communicate()
+            return 1, "", "gws subprocess timed out"
+            
+        if len(raw_stdout) > max_bytes:
+            return 1, "", f"gws stdout exceeded {max_bytes} bytes limit"
+        if len(raw_stderr) > max_bytes:
+            return 1, "", f"gws stderr exceeded {max_bytes} bytes limit"
+            
+        stdout_text = raw_stdout.decode("utf-8", errors="replace")
+        stderr_text = raw_stderr.decode("utf-8", errors="replace")
+        return proc.returncode, stdout_text, stderr_text
+    except Exception as e:
+        return 1, "", str(e)
 
 def trigger_sync():
     sync_script = SYNC_DIR / "omarchy-calendar-sync"
     if sync_script.exists():
-        subprocess.run([str(sync_script)], capture_output=True)
+        try:
+            subprocess.run([str(sync_script)], capture_output=True, timeout=30)
+        except Exception:
+            pass
 
 def resolve_tz():
     tz_env = os.environ.get("TZ")
@@ -58,11 +87,11 @@ LOCAL_TZ = resolve_tz()
 def add_event(calendar_id, title, date_str, start_time=None, end_time=None, location="", color_id=""):
     calendar_id = calendar_id or "primary"
     body = {
-        "summary": title.strip(),
-        "location": location.strip()
+        "summary": str(title).strip()[:500],
+        "location": str(location).strip()[:500]
     }
     if color_id:
-        body["colorId"] = str(color_id).strip()
+        body["colorId"] = str(color_id).strip()[:10]
     
     if start_time and ":" in start_time:
         start_time = start_time.strip()
@@ -113,7 +142,7 @@ def add_event(calendar_id, title, date_str, start_time=None, end_time=None, loca
 
 def delete_event(calendar_id, event_id):
     calendar_id = calendar_id or "primary"
-    params = {"calendarId": calendar_id, "eventId": event_id}
+    params = {"calendarId": calendar_id, "eventId": str(event_id).strip()}
     code, stdout, stderr = run_gws_cmd([
         "calendar", "events", "delete",
         "--params", json.dumps(params)
@@ -129,11 +158,11 @@ def delete_event(calendar_id, event_id):
 def update_event(calendar_id, event_id, title, date_str, start_time=None, end_time=None, location="", color_id=""):
     calendar_id = calendar_id or "primary"
     body = {
-        "summary": title.strip(),
-        "location": location.strip()
+        "summary": str(title).strip()[:500],
+        "location": str(location).strip()[:500]
     }
     if color_id:
-        body["colorId"] = str(color_id).strip()
+        body["colorId"] = str(color_id).strip()[:10]
     
     if start_time and ":" in start_time:
         start_time = start_time.strip()
@@ -165,7 +194,7 @@ def update_event(calendar_id, event_id, title, date_str, start_time=None, end_ti
         body["start"] = {"date": d_start.isoformat()}
         body["end"] = {"date": d_end.isoformat()}
 
-    params = {"calendarId": calendar_id, "eventId": event_id}
+    params = {"calendarId": calendar_id, "eventId": str(event_id).strip()}
     code, stdout, stderr = run_gws_cmd([
         "calendar", "events", "patch",
         "--params", json.dumps(params),
@@ -187,12 +216,12 @@ def list_calendars():
     try:
         data = json.loads(stdout)
         cals = []
-        for item in data.get("items", []):
+        for item in data.get("items", [])[:100]:  # Cap at 100 calendars
             role = item.get("accessRole", "")
             if role in ("owner", "writer"):
                 cals.append({
                     "id": item["id"],
-                    "name": item.get("summary", item["id"]),
+                    "name": item.get("summary", item["id"])[:100],
                     "primary": item.get("primary", False),
                     "color": item.get("backgroundColor", "#7bd148")
                 })

@@ -92,6 +92,8 @@ Panel {
 
   // The day whose agenda is listed under the grid. The upstream clock had no
   // cursor at all, so this is the one place the fork departs from it.
+  readonly property int maxStateFileSize: 2 * 1024 * 1024  // 2 MB strict boundary for state files
+
   property string selectedDayKey: todayKey
   readonly property var selectedEvents: Model.eventsForDateKey(eventIndex, selectedDayKey)
   readonly property date selectedDate: Model.dateFromKey(selectedDayKey, today)
@@ -99,7 +101,7 @@ Panel {
   readonly property var selectedDayWeather: weatherDoc && weatherDoc.forecast ? weatherDoc.forecast[selectedDayKey] : null
 
   function applyWeather(raw) {
-    if (!raw) {
+    if (!raw || typeof raw !== "string" || raw.length > root.maxStateFileSize) {
       root.weatherDoc = null
       return
     }
@@ -232,7 +234,7 @@ Panel {
     var doc = null
     var mismatch = false
 
-    if (raw) {
+    if (raw && typeof raw === "string" && raw.length <= root.maxStateFileSize) {
       try {
         var parsed = JSON.parse(raw)
         if (parsed && parsed.version === 1) {
@@ -565,7 +567,14 @@ Panel {
     path: (Quickshell.env("HOME") || "") + "/.local/state/omarchy/calendar-events.json"
     watchChanges: true
     printErrors: false
-    onLoaded: root.applyEvents(text())
+    onLoaded: {
+      var content = text()
+      if (content && content.length <= root.maxStateFileSize) {
+        root.applyEvents(content)
+      } else {
+        root.applyEvents("")
+      }
+    }
     onLoadFailed: root.applyEvents("")
     onFileChanged: reload()
   }
@@ -584,7 +593,14 @@ Panel {
     path: (Quickshell.env("HOME") || "") + "/.local/state/omarchy/calendar-weather.json"
     watchChanges: true
     printErrors: false
-    onLoaded: root.applyWeather(text())
+    onLoaded: {
+      var content = text()
+      if (content && content.length <= root.maxStateFileSize) {
+        root.applyWeather(content)
+      } else {
+        root.applyWeather("")
+      }
+    }
     onLoadFailed: root.applyWeather("")
     onFileChanged: reload()
   }
