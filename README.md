@@ -20,7 +20,7 @@ This is a fork of this plugin https://github.com/tmn73/omarchy-calendar.git
 ## 🌟 Vista Previa / Preview
 
 <div align="center">
-  <img src="preview.png" alt="Google Omarchalendar Preview" width="600px" style="border-radius: 12px; box-shadow: 0 4px 20px rgba(0,0,0,0.4);" />
+  <img src="assets/preview.png" alt="Google Omarchalendar Preview" width="850px" style="border-radius: 12px; box-shadow: 0 4px 20px rgba(0,0,0,0.4);" />
 </div>
 
 Reemplaza el reloj tradicional de la barra para brindarte una experiencia completa:
