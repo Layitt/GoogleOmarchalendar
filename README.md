@@ -59,21 +59,21 @@ omarchy plugin add https://github.com/Layitt/GoogleOmarchalendar.git --enable
 
 *O bien clonar manualmente en tu directorio de plugins:*
 ```bash
-git clone https://github.com/Layitt/GoogleOmarchalendar.git ~/.config/omarchy/plugins/tmn73.calendar
+git clone https://github.com/Layitt/GoogleOmarchalendar.git ~/.config/omarchy/plugins/layitt.google-omarchalendar
 ```
 
 ### 2. Configurar en `~/.config/omarchy/shell.json`
 
-Reemplaza la entrada de `omarchy.clock` por `tmn73.calendar` en tu archivo `~/.config/omarchy/shell.json`:
+Reemplaza la entrada de `omarchy.clock` por `layitt.google-omarchalendar` en tu archivo `~/.config/omarchy/shell.json`:
 
 ```json
 {
   "bar": {
-    "centerAnchor": "tmn73.calendar",
+    "centerAnchor": "layitt.google-omarchalendar",
     "layout": {
       "center": [
         { 
-          "id": "tmn73.calendar",
+          "id": "layitt.google-omarchalendar",
           "format": "dddd HH:mm"
         }
       ]
@@ -94,7 +94,7 @@ omarchy restart shell
 Para vincular tu cuenta de Google Calendar de forma segura y privada, ejecuta el asistente de configuración interactivo:
 
 ```bash
-~/.config/omarchy/plugins/tmn73.calendar/sync/setup
+~/.config/omarchy/plugins/layitt.google-omarchalendar/sync/setup
 ```
 
 El script te guiará paso a paso para:

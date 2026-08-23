@@ -17,8 +17,8 @@ import "Model.js" as Model
 // anchor against.
 Panel {
   id: root
-  moduleName: "tmn73.calendar"
-  ipcTarget: "tmn73.calendar"
+  moduleName: "layitt.google-omarchalendar"
+  ipcTarget: "layitt.google-omarchalendar"
   manageIpc: false
 
   property var anchorItem: null
@@ -127,7 +127,7 @@ Panel {
   Process {
     id: manageEventsProc
     property var pendingArgs: []
-    command: [(Quickshell.env("HOME") || "") + "/.config/omarchy/plugins/tmn73.calendar/sync/manage_events.py"].concat(pendingArgs)
+    command: [(Quickshell.env("HOME") || "") + "/.config/omarchy/plugins/" + root.moduleName + "/sync/manage_events.py"].concat(pendingArgs)
     onExited: {
       root.busyManagingEvent = false
       eventsFile.reload()
@@ -573,7 +573,7 @@ Panel {
   Process {
     id: weatherFetcherProc
     command: [
-      (Quickshell.env("HOME") || "") + "/.config/omarchy/plugins/tmn73.calendar/sync/fetch_weather.py",
+      (Quickshell.env("HOME") || "") + "/.config/omarchy/plugins/" + root.moduleName + "/sync/fetch_weather.py",
       "--lang", root.language
     ].concat(root.weatherLocation ? ["--location", root.weatherLocation] : [])
     onExited: weatherFile.reload()
