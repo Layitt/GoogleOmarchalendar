@@ -8,6 +8,7 @@ import json
 import os
 import re
 import subprocess
+import threading
 
 MINIMUM_VERSION = (0, 13, 2)
 FALLBACK_COLOR = "#9e9e9e"
@@ -36,32 +37,77 @@ class GwsApiError(GwsError):
     """Google returned an error, or gws returned something unparseable."""
 
 
-MAX_SUBPROCESS_BYTES = 5 * 1024 * 1024  # 5 MB maximum output per gws call
+MAX_SUBPROCESS_BYTES = 5 * 1024 * 1024  # 5 MB ceiling per gws call
+_CHUNK = 65536  # 64 KB read chunks
 
 
 def _subprocess_runner(argv, env, max_bytes=MAX_SUBPROCESS_BYTES):
+    """Run *argv* and return (returncode, stdout_str, stderr_str).
+
+    Both stdout and stderr are drained concurrently by two daemon threads.
+    The byte ceiling is enforced *producer-side*: as soon as either thread
+    accumulates more than max_bytes it kills the child process, which closes
+    both pipes and immediately unblocks the sibling thread.  No data beyond
+    the ceiling ever enters memory.
+    """
     proc = subprocess.Popen(
         argv,
         env=env,
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
     )
-    try:
-        raw_stdout, raw_stderr = proc.communicate(timeout=60)
-    except subprocess.TimeoutExpired:
-        proc.kill()
-        proc.communicate()
-        return 1, "", "gws subprocess timed out after 60s"
 
-    if len(raw_stdout) > max_bytes:
-        return 1, "", f"gws output exceeded maximum limit of {max_bytes} bytes"
-    if len(raw_stderr) > max_bytes:
-        return 1, "", f"gws stderr exceeded maximum limit of {max_bytes} bytes"
+    # Shared state written by threads, read only after both join.
+    stdout_chunks = []
+    stderr_chunks = []
+    overflow_flag = [False]   # set by whichever thread hits the ceiling first
+    error_msg = [""]
+
+    def _kill_child(reason):
+        if not overflow_flag[0]:
+            overflow_flag[0] = True
+            error_msg[0] = reason
+            try:
+                proc.kill()
+            except OSError:
+                pass
+
+    def drain(pipe, bucket):
+        total = 0
+        while True:
+            try:
+                chunk = pipe.read(_CHUNK)
+            except OSError:
+                break
+            if not chunk:
+                break
+            total += len(chunk)
+            if total > max_bytes:
+                _kill_child(f"gws output exceeded maximum of {max_bytes} bytes")
+                return
+            bucket.append(chunk)
+
+    t_out = threading.Thread(target=drain, args=(proc.stdout, stdout_chunks), daemon=True)
+    t_err = threading.Thread(target=drain, args=(proc.stderr, stderr_chunks), daemon=True)
+    t_out.start()
+    t_err.start()
+    t_out.join(timeout=65)
+    t_err.join(timeout=65)
+
+    if t_out.is_alive() or t_err.is_alive():
+        _kill_child("gws subprocess timed out after 65s")
+        t_out.join(timeout=5)
+        t_err.join(timeout=5)
+
+    proc.wait()
+
+    if overflow_flag[0]:
+        return 1, "", error_msg[0]
 
     return (
         proc.returncode,
-        raw_stdout.decode("utf-8", errors="replace"),
-        raw_stderr.decode("utf-8", errors="replace"),
+        b"".join(stdout_chunks).decode("utf-8", errors="replace"),
+        b"".join(stderr_chunks).decode("utf-8", errors="replace"),
     )
 
 
