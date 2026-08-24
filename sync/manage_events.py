@@ -19,12 +19,38 @@ STATE_FILE = Path.home() / ".local" / "state" / "omarchy" / "calendar-events.jso
 MAX_SUBPROCESS_BYTES = 2 * 1024 * 1024  # 2 MB ceiling per gws call
 _CHUNK = 65536  # 64 KB read chunks
 
+_MAX_CONFIG_READ = 64 * 1024  # 64 KB ceiling for calendar-sync.json
+
+def _safe_gws_path(raw_path):
+    """Return a safe binary path or 'gws' (the bare fallback).
+
+    Rejects any value that contains null bytes or characters that should
+    never appear in a filesystem path, and, when an absolute path is
+    given, checks that the target file exists and is executable.
+    """
+    p = str(raw_path or "gws").strip()
+    if not p:
+        return "gws"
+    # Reject dangerous characters: null byte, shell metachars, whitespace.
+    _FORBIDDEN = set('\x00|;&$`(){}[]<>\\\'"\t\n\r ')
+    if any(c in _FORBIDDEN for c in p):
+        return "gws"
+    # If caller gave an absolute path, insist it exists and is executable.
+    if os.path.isabs(p):
+        if not os.path.isfile(p) or not os.access(p, os.X_OK):
+            return "gws"
+    return p
+
 def get_gws_info():
     if CONFIG_PATH.exists():
         try:
-            with open(CONFIG_PATH, "r", encoding="utf-8") as f:
-                data = json.load(f)
-                return data.get("gwsPath", "gws"), data.get("profile", os.path.expanduser("~/.config/gws-omarchy-calendar"))
+            size = os.path.getsize(CONFIG_PATH)
+            if size <= _MAX_CONFIG_READ:
+                with open(CONFIG_PATH, "r", encoding="utf-8") as f:
+                    data = json.load(f)
+                    gws_bin = _safe_gws_path(data.get("gwsPath", "gws"))
+                    profile = data.get("profile", os.path.expanduser("~/.config/gws-omarchy-calendar"))
+                    return gws_bin, profile
         except Exception:
             pass
     return "gws", os.path.expanduser("~/.config/gws-omarchy-calendar")

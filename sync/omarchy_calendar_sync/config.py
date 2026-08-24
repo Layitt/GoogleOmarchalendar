@@ -26,6 +26,9 @@ class ConfigError(Exception):
     """Raised when the config file exists but cannot be used."""
 
 
+MAX_CONFIG_BYTES = 64 * 1024  # 64 KB ceiling for the config file
+
+
 def load(path=None):
     """Load config, filling in defaults for anything absent."""
     path = Path(path) if path is not None else CONFIG_PATH
@@ -34,7 +37,14 @@ def load(path=None):
         return _merge(copy.deepcopy(DEFAULTS), {})
 
     try:
-        raw = json.loads(path.read_text())
+        size = path.stat().st_size
+        if size > MAX_CONFIG_BYTES:
+            raise ConfigError(
+                f"{path} is {size} bytes, exceeding the {MAX_CONFIG_BYTES}-byte limit"
+            )
+        raw = json.loads(path.read_text(encoding="utf-8"))
+    except ConfigError:
+        raise
     except (OSError, json.JSONDecodeError) as error:
         raise ConfigError(f"cannot read {path}: {error}") from error
 

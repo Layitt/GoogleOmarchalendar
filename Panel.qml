@@ -1667,6 +1667,7 @@ Panel {
           TextField {
             id: modalTitleField
             width: parent.width
+            maxLength: 500
             placeholderText: root.language === "en" ? "e.g. Project meeting..." : "Ej. Reunión de proyecto..."
             foreground: root.contentForeground
             font.family: root.contentFontFamily
@@ -1767,6 +1768,7 @@ Panel {
               TextField {
                 id: modalStartTimeField
                 width: parent.width
+                maxLength: 5
                 placeholderText: "10:00"
                 foreground: root.contentForeground
                 font.family: root.contentFontFamily
@@ -1796,6 +1798,7 @@ Panel {
               TextField {
                 id: modalEndTimeField
                 width: parent.width
+                maxLength: 5
                 placeholderText: "11:00"
                 foreground: root.contentForeground
                 font.family: root.contentFontFamily
@@ -1822,6 +1825,7 @@ Panel {
           TextField {
             id: modalLocationField
             width: parent.width
+            maxLength: 500
             placeholderText: root.language === "en" ? "e.g. Google Meet, Office..." : "Ej. Google Meet, Oficina..."
             foreground: root.contentForeground
             font.family: root.contentFontFamily
