@@ -103,12 +103,52 @@ def run_gws_cmd(args, max_bytes=MAX_SUBPROCESS_BYTES):
     )
 
 def trigger_sync():
+    """Fire the background sync script and discard its output.
+
+    Uses the same bounded draining pattern as run_gws_cmd so no subprocess
+    path in this file buffers data without a ceiling.
+    """
     sync_script = SYNC_DIR / "omarchy-calendar-sync"
-    if sync_script.exists():
+    if not sync_script.exists():
+        return
+    try:
+        proc = subprocess.Popen(
+            [str(sync_script)],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+        )
+    except Exception:
+        return
+
+    def _discard(pipe):
+        total = 0
+        while True:
+            try:
+                chunk = pipe.read(_CHUNK)
+            except OSError:
+                break
+            if not chunk:
+                break
+            total += len(chunk)
+            if total > MAX_SUBPROCESS_BYTES:
+                try:
+                    proc.kill()
+                except OSError:
+                    pass
+                return
+
+    t_out = threading.Thread(target=_discard, args=(proc.stdout,), daemon=True)
+    t_err = threading.Thread(target=_discard, args=(proc.stderr,), daemon=True)
+    t_out.start()
+    t_err.start()
+    t_out.join(timeout=35)
+    t_err.join(timeout=35)
+    if t_out.is_alive() or t_err.is_alive():
         try:
-            subprocess.run([str(sync_script)], capture_output=True, timeout=30)
-        except Exception:
+            proc.kill()
+        except OSError:
             pass
+    proc.wait()
 
 def resolve_tz():
     tz_env = os.environ.get("TZ")
