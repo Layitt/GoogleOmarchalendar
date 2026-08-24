@@ -4,6 +4,7 @@ import json
 import os
 import subprocess
 import sys
+import threading
 from datetime import datetime, date, timedelta
 from pathlib import Path
 from zoneinfo import ZoneInfo
@@ -14,8 +15,9 @@ PLUGIN_DIR = SYNC_DIR.parent
 CONFIG_PATH = Path.home() / ".config" / "omarchy" / "calendar-sync.json"
 STATE_FILE = Path.home() / ".local" / "state" / "omarchy" / "calendar-events.json"
 
-# Resource-bounding limits
-MAX_SUBPROCESS_BYTES = 2 * 1024 * 1024  # 2 MB maximum output from gws CLI
+# Enforce the byte ceiling while reading from pipes, not after buffering.
+MAX_SUBPROCESS_BYTES = 2 * 1024 * 1024  # 2 MB ceiling per gws call
+_CHUNK = 65536  # 64 KB read chunks
 
 def get_gws_info():
     if CONFIG_PATH.exists():
@@ -28,34 +30,77 @@ def get_gws_info():
     return "gws", os.path.expanduser("~/.config/gws-omarchy-calendar")
 
 def run_gws_cmd(args, max_bytes=MAX_SUBPROCESS_BYTES):
+    """Run a gws command enforcing a producer-side byte ceiling.
+
+    Both pipes are drained concurrently by daemon threads.  The moment
+    either accumulates more than max_bytes the child is killed, which
+    closes both pipes and immediately unblocks the sibling thread.
+    """
     gws_bin, profile = get_gws_info()
     env = dict(os.environ)
     env["GOOGLE_WORKSPACE_CLI_CONFIG_DIR"] = str(profile)
-    
+
     try:
         proc = subprocess.Popen(
             [gws_bin] + args,
             env=env,
             stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE
+            stderr=subprocess.PIPE,
         )
-        try:
-            raw_stdout, raw_stderr = proc.communicate(timeout=30)
-        except subprocess.TimeoutExpired:
-            proc.kill()
-            proc.communicate()
-            return 1, "", "gws subprocess timed out"
-            
-        if len(raw_stdout) > max_bytes:
-            return 1, "", f"gws stdout exceeded {max_bytes} bytes limit"
-        if len(raw_stderr) > max_bytes:
-            return 1, "", f"gws stderr exceeded {max_bytes} bytes limit"
-            
-        stdout_text = raw_stdout.decode("utf-8", errors="replace")
-        stderr_text = raw_stderr.decode("utf-8", errors="replace")
-        return proc.returncode, stdout_text, stderr_text
     except Exception as e:
         return 1, "", str(e)
+
+    stdout_chunks = []
+    stderr_chunks = []
+    overflow_flag = [False]
+    error_msg = [""]
+
+    def _kill_child(reason):
+        if not overflow_flag[0]:
+            overflow_flag[0] = True
+            error_msg[0] = reason
+            try:
+                proc.kill()
+            except OSError:
+                pass
+
+    def drain(pipe, bucket):
+        total = 0
+        while True:
+            try:
+                chunk = pipe.read(_CHUNK)
+            except OSError:
+                break
+            if not chunk:
+                break
+            total += len(chunk)
+            if total > max_bytes:
+                _kill_child(f"gws output exceeded maximum of {max_bytes} bytes")
+                return
+            bucket.append(chunk)
+
+    t_out = threading.Thread(target=drain, args=(proc.stdout, stdout_chunks), daemon=True)
+    t_err = threading.Thread(target=drain, args=(proc.stderr, stderr_chunks), daemon=True)
+    t_out.start()
+    t_err.start()
+    t_out.join(timeout=35)
+    t_err.join(timeout=35)
+
+    if t_out.is_alive() or t_err.is_alive():
+        _kill_child("gws subprocess timed out after 35s")
+        t_out.join(timeout=5)
+        t_err.join(timeout=5)
+
+    proc.wait()
+
+    if overflow_flag[0]:
+        return 1, "", error_msg[0]
+
+    return (
+        proc.returncode,
+        b"".join(stdout_chunks).decode("utf-8", errors="replace"),
+        b"".join(stderr_chunks).decode("utf-8", errors="replace"),
+    )
 
 def trigger_sync():
     sync_script = SYNC_DIR / "omarchy-calendar-sync"
