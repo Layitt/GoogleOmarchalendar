@@ -15,7 +15,6 @@ from datetime import datetime
 
 STATE_DIR = os.path.expanduser("~/.local/state/omarchy")
 OUTPUT_FILE = os.path.join(STATE_DIR, "calendar-weather.json")
-LEGACY_OUTPUT_FILE = os.path.join(STATE_DIR, "weather-morelia.json")
 
 # Resource-bounding limits to prevent memory exhaustion
 MAX_HTTP_BYTES = 512 * 1024       # 512 KB maximum HTTP payload
@@ -242,12 +241,6 @@ def fetch_weather(location_query=None, lang="es"):
     with open(temp_file, "w", encoding="utf-8") as f:
         f.write(serialized)
     os.replace(temp_file, OUTPUT_FILE)
-
-    try:
-        with open(LEGACY_OUTPUT_FILE, "w", encoding="utf-8") as f:
-            f.write(serialized)
-    except Exception:
-        pass
     return True
 
 def main():

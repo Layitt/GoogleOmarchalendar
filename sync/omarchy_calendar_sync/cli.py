@@ -155,7 +155,7 @@ def run(client, cfg, now, out_path, local_tz):
         print(
             "if this is an auth error, run: "
             "GOOGLE_WORKSPACE_CLI_CONFIG_DIR=" + str(cfg["profile"]) + " "
-            "gws auth login --scopes https://www.googleapis.com/auth/calendar.readonly",
+            "gws auth login --scopes https://www.googleapis.com/auth/calendar.events,https://www.googleapis.com/auth/calendar.readonly",
             file=sys.stderr,
         )
         return EXIT_SYNC_FAILED

@@ -1,6 +1,9 @@
+import sys
 import unittest
+from pathlib import Path
 from zoneinfo import ZoneInfo
 
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "sync"))
 from omarchy_calendar_sync import normalize
 
 BOGOTA = ZoneInfo("America/Bogota")

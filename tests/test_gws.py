@@ -1,7 +1,9 @@
 import json
+import sys
 import unittest
 from pathlib import Path
 
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "sync"))
 from omarchy_calendar_sync import gws
 
 FIXTURES = Path(__file__).parent / "fixtures"

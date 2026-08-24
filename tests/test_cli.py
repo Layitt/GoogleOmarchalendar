@@ -2,12 +2,14 @@ import contextlib
 import io
 import json
 import os
+import sys
 import tempfile
 import unittest
 from datetime import datetime, timezone
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "sync"))
 from omarchy_calendar_sync import cli, config, contract, gws
 
 BOGOTA = ZoneInfo("America/Bogota")

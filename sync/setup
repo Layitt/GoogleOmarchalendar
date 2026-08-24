@@ -18,7 +18,7 @@ PROFILE="${PROFILE:-$HOME/.config/gws-omarchy-calendar}"
 GCLOUD_CONFIG="${GCLOUD_CONFIG:-omarchy-calendar}"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SYNC_BIN="$SCRIPT_DIR/omarchy-calendar-sync"
-SCOPE="https://www.googleapis.com/auth/calendar.readonly"
+SCOPE="https://www.googleapis.com/auth/calendar.events,https://www.googleapis.com/auth/calendar.readonly"
 
 step() { printf '\n==> %s\n' "$1"; }
 
@@ -116,24 +116,24 @@ Open:
 EOF
 pause
 
-step "Manual step 2 of 4: declare the calendar scope"
+step "Manual step 2 of 4: declare the calendar scopes"
 cat <<EOF
 Open:
   https://console.cloud.google.com/auth/scopes?project=$PROJECT_ID
 
   Click "Add or remove scopes"
-  Filter for:  calendar.readonly
-  Tick:        $SCOPE
-               ("See and download any calendar you can access")
+  Filter and tick BOTH:
+    1. .../auth/calendar.events   ("See, edit, share, and permanently delete all the calendars you can access using Google Calendar")
+    2. .../auth/calendar.readonly ("See and download any calendar you can access using Google Calendar")
   Update, then Save
 
   If Save is greyed out, fill in "How will the scopes be used?" with
-  something like: Read-only display of my own calendar in a desktop
-  status bar widget.
+  something like: Display and manage events on my Google Calendar directly
+  from my desktop status bar widget.
 
-Do not skip this. A scope that is not declared here is not offered on the
-consent screen at all, so there is no box to tick, Google grants only your
-email address, and every sync fails with 403 insufficient scopes. Google will
+Do not skip this. Scopes that are not declared here are not offered on the
+consent screen at all, so there are no boxes to tick, Google grants only your
+email address, and sync/event management fails with 403 insufficient scopes. Google will
 warn that sensitive scopes need verification; that is expected and harmless
 for personal use, which stays under the unverified cap.
 EOF
@@ -185,13 +185,13 @@ else
 fi
 chmod 600 "$PROFILE/client_secret.json"
 
-step "Signing in with read-only calendar access"
+step "Signing in with calendar read and write access"
 cat <<'EOF'
-On the consent screen, TICK THE CHECKBOX granting read access to your
-calendars before clicking Continue. It is not ticked for you.
+On the consent screen, TICK THE CHECKBOXES granting calendar access
+before clicking Continue. They are not ticked for you.
 
-Clicking Continue without it still reports a successful login, but grants only
-your email address, and every sync then fails with 403 insufficient scopes.
+Clicking Continue without them still reports a successful login, but grants only
+your email address, and every sync/event action then fails with 403 insufficient scopes.
 EOF
 # gws caches the access token next to the credentials. A cache minted before
 # the calendar scope was granted keeps being served afterwards, and every
@@ -200,20 +200,20 @@ rm -f "$PROFILE/token_cache.json"
 GOOGLE_WORKSPACE_CLI_CONFIG_DIR="$PROFILE" gws auth login --scopes "$SCOPE"
 
 step "Checking the calendar scope was actually granted"
-if ! GOOGLE_WORKSPACE_CLI_CONFIG_DIR="$PROFILE" gws auth status 2>/dev/null | grep -q "$SCOPE"; then
+if ! GOOGLE_WORKSPACE_CLI_CONFIG_DIR="$PROFILE" gws auth status 2>/dev/null | grep -E -q "calendar(\.events|\.readonly|$)"; then
   cat <<EOF
 
 The calendar scope was NOT granted. gws is holding a token that can only read
 your email address.
 
-This almost always means the calendar checkbox on the consent screen was left
-unticked. Run this script again and tick it.
+This almost always means the calendar checkboxes on the consent screen were left
+unticked. Run this script again and tick them.
 
   granted scopes: $(GOOGLE_WORKSPACE_CLI_CONFIG_DIR="$PROFILE" gws auth status 2>/dev/null | grep -A6 '"scopes"' | grep googleapis || echo "identity only")
 EOF
   exit 1
 fi
-echo "  calendar.readonly granted"
+echo "  calendar permissions granted"
 
 step "Verifying calendar access"
 # Surface a real error rather than reading `items` out of an error body and

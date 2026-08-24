@@ -126,10 +126,13 @@ Panel {
   property bool modalAllDay: false
   property bool busyManagingEvent: false
 
+  readonly property string manageEventsScript: Model.commandPathFromUrl(Qt.resolvedUrl("sync/manage_events.py"))
+  readonly property string fetchWeatherScript: Model.commandPathFromUrl(Qt.resolvedUrl("sync/fetch_weather.py"))
+
   Process {
     id: manageEventsProc
     property var pendingArgs: []
-    command: [(Quickshell.env("HOME") || "") + "/.config/omarchy/plugins/" + root.moduleName + "/sync/manage_events.py"].concat(pendingArgs)
+    command: [root.manageEventsScript].concat(pendingArgs)
     onExited: {
       root.busyManagingEvent = false
       eventsFile.reload()
@@ -582,7 +585,7 @@ Panel {
   Process {
     id: weatherFetcherProc
     command: [
-      (Quickshell.env("HOME") || "") + "/.config/omarchy/plugins/" + root.moduleName + "/sync/fetch_weather.py",
+      root.fetchWeatherScript,
       "--lang", root.language
     ].concat(root.weatherLocation ? ["--location", root.weatherLocation] : [])
     onExited: weatherFile.reload()
